@@ -1,0 +1,154 @@
+[
+  {
+    "id": "dhr-njp",
+    "name": "New Jalpaiguri (NJP)",
+    "coordinates": [26.6854, 88.4428],
+    "elevationMeters": 114,
+    "chainageKm": 0.0,
+    "description": "DHR Southern Terminus & Broad Gauge Interchange"
+  },
+  {
+    "id": "dhr-siliguri-jn",
+    "name": "Siliguri Junction",
+    "coordinates": [26.7271, 88.4203],
+    "elevationMeters": 122,
+    "chainageKm": 7.5,
+    "description": "Foothills junction & urban transit point"
+  },
+  {
+    "id": "dhr-sukna",
+    "name": "Sukna Station",
+    "coordinates": [26.7905, 88.3619],
+    "elevationMeters": 163,
+    "chainageKm": 17.2,
+    "description": "Gateway to Mahananda Wildlife Sanctuary forest incline"
+  },
+  {
+    "id": "dhr-rangtong",
+    "name": "Rangtong Station",
+    "coordinates": [26.8302, 88.3394],
+    "elevationMeters": 428,
+    "chainageKm": 23.3,
+    "description": "Start of steep mountain climb & Loop No. 1"
+  },
+  {
+    "id": "dhr-chunbhati",
+    "name": "Chunbhati Loop",
+    "coordinates": [26.8491, 88.3308],
+    "elevationMeters": 670,
+    "chainageKm": 28.5,
+    "description": "Loop 2 & 3 terrain with high-angle cut slopes"
+  },
+  {
+    "id": "dhr-tindharia-stn",
+    "name": "Tindharia Station",
+    "coordinates": [26.8525, 88.3339],
+    "elevationMeters": 860,
+    "chainageKm": 31.5,
+    "description": "Historic hill town station & zigzag reverse switchbacks"
+  },
+  {
+    "id": "dhr-tindharia-ws",
+    "name": "Tindharia Loco Workshop",
+    "coordinates": [26.855, 88.3325],
+    "elevationMeters": 865,
+    "chainageKm": 32.1,
+    "description": "Heritage steam locomotive workshop & retaining wall corridor"
+  },
+  {
+    "id": "dhr-gayabari",
+    "name": "Gayabari Station",
+    "coordinates": [26.8617, 88.3186],
+    "elevationMeters": 1072,
+    "chainageKm": 37.0,
+    "description": "Upper terrace station above tea gardens"
+  },
+  {
+    "id": "dhr-pagla-jhora",
+    "name": "Pagla Jhora Slide Zone",
+    "coordinates": [26.869, 88.314],
+    "elevationMeters": 1150,
+    "chainageKm": 39.2,
+    "description": "Critical active monsoon slide & seasonal mountain torrent"
+  },
+  {
+    "id": "dhr-mahanadi",
+    "name": "Mahanadi Station",
+    "coordinates": [26.8778, 88.3072],
+    "elevationMeters": 1255,
+    "chainageKm": 40.5,
+    "description": "Forested ridge saddle & high rainfall drainage sector"
+  },
+  {
+    "id": "dhr-kurseong",
+    "name": "Kurseong Town & Station",
+    "coordinates": [26.8812, 88.2789],
+    "elevationMeters": 1483,
+    "chainageKm": 48.0,
+    "description": "Major sub-divisional center, street-running rail section"
+  },
+  {
+    "id": "dhr-tung",
+    "name": "Tung Station",
+    "coordinates": [26.9125, 88.2722],
+    "elevationMeters": 1728,
+    "chainageKm": 56.0,
+    "description": "Tea garden slope cuttings & masonry drainage culverts"
+  },
+  {
+    "id": "dhr-dilaram",
+    "name": "Dilaram Crest",
+    "coordinates": [26.9389, 88.2731],
+    "elevationMeters": 1850,
+    "chainageKm": 60.5,
+    "description": "Ridge crossing with steep eastern slope exposure"
+  },
+  {
+    "id": "dhr-sonada",
+    "name": "Sonada Station",
+    "coordinates": [26.9639, 88.2683],
+    "elevationMeters": 1991,
+    "chainageKm": 65.5,
+    "description": "Pine forest zone prone to groundwater seepage"
+  },
+  {
+    "id": "dhr-rangbul",
+    "name": "Rangbul Station",
+    "coordinates": [26.9806, 88.2708],
+    "elevationMeters": 2134,
+    "chainageKm": 71.0,
+    "description": "High altitude mist corridor with moss-covered retaining walls"
+  },
+  {
+    "id": "dhr-jorebungalow",
+    "name": "Jorebungalow Junction",
+    "coordinates": [26.9997, 88.2639],
+    "elevationMeters": 2210,
+    "chainageKm": 74.0,
+    "description": "Road-rail convergence near Senchal Wildlife Sanctuary"
+  },
+  {
+    "id": "dhr-ghum",
+    "name": "Ghum Station",
+    "coordinates": [27.0094, 88.2589],
+    "elevationMeters": 2258,
+    "chainageKm": 77.0,
+    "description": "Highest railway station in India (7,407 ft)"
+  },
+  {
+    "id": "dhr-batasia-loop",
+    "name": "Batasia Loop",
+    "coordinates": [27.0168, 88.2528],
+    "elevationMeters": 2100,
+    "chainageKm": 80.0,
+    "description": "Iconic double-loop descending toward Darjeeling"
+  },
+  {
+    "id": "dhr-darjeeling",
+    "name": "Darjeeling Station",
+    "coordinates": [27.0425, 88.2636],
+    "elevationMeters": 2076,
+    "chainageKm": 88.0,
+    "description": "Northern terminus overlooking Mount Kangchenjunga slopes"
+  }
+]
