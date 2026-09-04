@@ -81,3 +81,46 @@ CREATE POLICY "Public update access for hazard-photos"
   FOR UPDATE
   TO anon, authenticated
   USING (bucket_id = 'hazard-photos');
+
+-- ==============================================================================
+-- 3. Create official_alerts table (Relay Down Subsystem)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.official_alerts (
+  id TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hazard_type TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  message TEXT NOT NULL,
+  latitude DOUBLE PRECISION,
+  longitude DOUBLE PRECISION,
+  photo_url TEXT,
+  hop_count INT NOT NULL DEFAULT 0
+);
+
+-- Indexing for official alerts
+CREATE INDEX IF NOT EXISTS idx_official_alerts_created_at ON public.official_alerts (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_official_alerts_severity ON public.official_alerts (severity);
+CREATE INDEX IF NOT EXISTS idx_official_alerts_hazard_type ON public.official_alerts (hazard_type);
+
+-- Enable RLS
+ALTER TABLE public.official_alerts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read access on official_alerts"
+  ON public.official_alerts
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
+CREATE POLICY "Allow public insert/upsert on official_alerts"
+  ON public.official_alerts
+  FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);
+
+CREATE POLICY "Allow public update on official_alerts"
+  ON public.official_alerts
+  FOR UPDATE
+  TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
+
