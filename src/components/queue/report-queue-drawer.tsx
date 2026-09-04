@@ -184,7 +184,7 @@ export const ReportQueueDrawer: React.FC<ReportQueueDrawerProps> = ({
               />
               <input
                 type="password"
-                placeholder="VITE_SUPABASE_ANON_KEY"
+                placeholder="VITE_SUPABASE_PUBLISHABLE_KEY"
                 value={supaKey}
                 onChange={(e) => setSupaKey(e.target.value)}
                 className="w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
