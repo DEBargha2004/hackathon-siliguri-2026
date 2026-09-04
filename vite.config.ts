@@ -3,10 +3,12 @@ import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
+import { reportsApiPlugin } from './vite-plugins/reports-api-plugin.ts'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    reportsApiPlugin(),
     react(),
     tailwindcss(),
     VitePWA({

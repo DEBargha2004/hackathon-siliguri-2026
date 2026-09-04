@@ -42,7 +42,7 @@ export const StepConfirm: React.FC<StepConfirmProps> = ({
         ) : (
           <>
             <Zap className="h-4 w-4" />
-            <span>⚡ Analyze Hazard & Get Directive</span>
+            <span>Analyze Hazard & Get Directive</span>
           </>
         )}
       </Button>

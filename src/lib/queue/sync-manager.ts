@@ -6,7 +6,10 @@ import {
   markReportSynced,
   markReportSyncing,
 } from "./report-store";
-import { HttpSyncTransport, MockSyncTransport, type SyncTransport } from "./sync-transport";
+import {
+  createDefaultSyncTransport,
+  type SyncTransport,
+} from "./sync-transport";
 
 export type QueueListener = (event: QueueEvent) => void;
 
@@ -29,13 +32,8 @@ export class SyncManager {
   private activeTimers: Set<number> = new Set();
 
   private constructor(options: SyncManagerOptions = {}) {
-    // Default to MockSyncTransport for safe offline demo unless VITE_REPORT_SYNC_ENDPOINT is provided
-    const hasRealEndpoint =
-      typeof import.meta !== "undefined" && Boolean(import.meta.env?.VITE_REPORT_SYNC_ENDPOINT);
-
-    this.transport =
-      options.transport ||
-      (hasRealEndpoint ? new HttpSyncTransport() : new MockSyncTransport({ delayMs: 500 }));
+    // Defaults to Supabase (if configured) or real HTTP gateway (/api/reports)
+    this.transport = options.transport || createDefaultSyncTransport();
 
     this.maxRetries = options.maxRetries ?? 6;
     this.baseBackoffMs = options.baseBackoffMs ?? 1500;
@@ -56,6 +54,11 @@ export class SyncManager {
   }
 
   public getTransport(): SyncTransport {
+    return this.transport;
+  }
+
+  public refreshTransport(): SyncTransport {
+    this.transport = createDefaultSyncTransport();
     return this.transport;
   }
 
