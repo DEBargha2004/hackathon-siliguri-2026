@@ -50,13 +50,25 @@ assert(compacted.includes("a=candidate:1"), "Compacted SDP preserves essential h
 assert(compacted.includes("a=sctp-port:5000"), "Compacted SDP preserves SCTP configuration");
 assert(compacted.endsWith("\r\n"), "Compacted SDP strictly terminates with mandatory CRLF");
 
-// Test corrupted / concatenated SDP lines (the exact issue reported by user)
+// Test corrupted / concatenated SDP lines (the exact issues reported by user)
 const corruptedSdp = "v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\na=mid:0a=max-message-size:.....a=candidate:1 1 UDP 123 192.168.1.1 5000 typ host";
 const sanitized = sanitizeSDP(corruptedSdp);
 assert(sanitized.includes("a=mid:0\r\n"), "SanitizeSDP splits concatenated lines before a=mid:0");
 assert(sanitized.includes("a=max-message-size:262144\r\n"), "SanitizeSDP repairs corrupted a=max-message-size:..... to standard 262144");
 assert(sanitized.includes("a=candidate:1"), "SanitizeSDP preserves candidate line after repaired boundary");
 assert(sanitized.endsWith("\r\n"), "SanitizeSDP ensures trailing CRLF");
+
+// Test concatenated candidate lines from chunking (network-cost 10a=candidate:)
+const candidateCorrupted = "a=candidate:4150815149 1 udp 2122129151 10.43.220.159 35221 typ host generation 0 network-id 1 network-cost 10a=candidate:1663057610 1 udp 2122197247 10.43.220.160 47072 typ host generation 0 network-id 2 network-cost 10";
+const sanitizedCandidates = sanitizeSDP(candidateCorrupted);
+assert(sanitizedCandidates.includes("network-cost 10\r\n"), "SanitizeSDP splits network-cost 10 before a=candidate:");
+assert(sanitizedCandidates.includes("a=candidate:1663057610"), "SanitizeSDP separates candidate 1663057610 cleanly");
+
+// Test IPv6 filtering in compactSDP
+const sdpWithIpv6 = "v=0\r\na=candidate:1 1 udp 123 10.43.220.159 5000 typ host\r\na=candidate:2 1 udp 456 2409:40e1:340a:27ea::cc 5001 typ host\r\n";
+const compactedIpv6 = compactSDP(sdpWithIpv6);
+assert(compactedIpv6.includes("10.43.220.159"), "CompactSDP preserves IPv4 local hotspot candidates");
+assert(!compactedIpv6.includes("2409:40e1"), "CompactSDP strips unroutable IPv6 cellular candidates for offline hotspot");
 
 // ----------------------------------------------------
 // 2. Optical QR Signaling: Single vs Multi-Frame Chunking

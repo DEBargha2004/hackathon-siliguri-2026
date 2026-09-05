@@ -15,7 +15,11 @@ import {
 import { Button } from "@/components/ui/button";
 import type { OfficialAlert, TransferProgress } from "@/types/alert";
 import { canRelayAlert } from "@/lib/relay/alert-store";
-import { prepareQRFrames, renderQRCodeDataUrl } from "@/lib/relay/qr-signaling";
+import {
+  prepareQRFrames,
+  renderQRCodeDataUrl,
+  sanitizeSDP,
+} from "@/lib/relay/qr-signaling";
 import {
   initHostPeer,
   type HostPeerSession,
@@ -171,7 +175,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
     try {
       setErrorMessage(null);
       setStep(3); // Transition to transferring state
-      await sessionRef.current.applyAnswerSdp(scannedAnswerSdp);
+      const cleanAnswer = sanitizeSDP(scannedAnswerSdp);
+      await sessionRef.current.applyAnswerSdp(cleanAnswer);
 
       const activeChannel = sessionRef.current.dataChannel;
 

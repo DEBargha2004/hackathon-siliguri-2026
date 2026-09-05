@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { OfficialAlert, TransferProgress } from "@/types/alert";
-import { prepareQRFrames, renderQRCodeDataUrl } from "@/lib/relay/qr-signaling";
+import {
+  prepareQRFrames,
+  renderQRCodeDataUrl,
+  sanitizeSDP,
+} from "@/lib/relay/qr-signaling";
 import {
   initReceiverPeer,
   type ReceiverPeerSession,
@@ -114,8 +118,9 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
       setStep(2); // Show Answer QR
 
       let isCancelled = false;
+      const cleanOffer = sanitizeSDP(scannedOfferSdp);
 
-      const receiverSession = await initReceiverPeer(scannedOfferSdp, {
+      const receiverSession = await initReceiverPeer(cleanOffer, {
         onStateChange: (state) => {
           if (!isCancelled) setConnState(state);
         },

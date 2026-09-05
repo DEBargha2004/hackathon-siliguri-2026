@@ -33,6 +33,9 @@ export function compactSDP(sdp: string): string {
     // Strip mDNS (.local) candidates that cannot be resolved in offline air-gapped hotspot
     if (line.startsWith("a=candidate:") && line.includes(".local")) continue;
 
+    // Strip IPv6 candidates in offline hotspot mode (hotspots route over IPv4 e.g. 192.168.x.x / 10.x.x.x)
+    if (line.startsWith("a=candidate:") && !line.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/)) continue;
+
     // Sanitize max-message-size if present
     if (line.startsWith("a=max-message-size:")) {
       const match = line.match(/^a=max-message-size:\s*(\d+)/i);
@@ -51,7 +54,7 @@ export function compactSDP(sdp: string): string {
 
 /**
  * Rigorously sanitizes and normalizes WebRTC SDP strings before passing to RTCSessionDescription.
- * 1. Repairs concatenated lines where CRLF was lost (e.g., "...a=mid:0a=max-message-size:262144...")
+ * 1. Repairs concatenated lines where CRLF was lost (e.g. "...network-cost 10a=candidate:...")
  * 2. Normalizes line endings to strict CRLF (\r\n) per RFC 4566.
  * 3. Fixes/clamps any malformed a=max-message-size line to valid WebRTC syntax.
  * 4. Ensures mandatory trailing CRLF so parsers don't reject the last line.
@@ -59,8 +62,9 @@ export function compactSDP(sdp: string): string {
 export function sanitizeSDP(sdp: string): string {
   if (!sdp) return "";
 
-  // 1. Repair lines concatenated without newline
-  let repaired = sdp.replace(/([^\r\n])(?=[a-z]=)/g, "$1\r\n");
+  // 1. Repair lines concatenated without newline using safe replacer function
+  let repaired = sdp.replace(/([^\r\n])(?=[a-z]=)/g, (_match, p1) => p1 + "\r\n");
+  repaired = repaired.replace(/([^\r\n])(?=a=[a-z-]+:)/g, (_match, p1) => p1 + "\r\n");
 
   // 2. Split lines and process individually
   const rawLines = repaired.split(/\r?\n/);
@@ -69,6 +73,15 @@ export function sanitizeSDP(sdp: string): string {
   for (let line of rawLines) {
     line = line.trim();
     if (!line) continue;
+
+    // If candidate line still has concatenated attributes, split them
+    if (line.includes("a=candidate:") && !line.startsWith("a=candidate:")) {
+      const subParts = line.split(/(?=a=candidate:)/);
+      for (const sub of subParts) {
+        if (sub.trim()) cleanLines.push(sub.trim());
+      }
+      continue;
+    }
 
     // Validate and sanitize a=max-message-size
     if (line.startsWith("a=max-message-size:")) {
@@ -237,8 +250,23 @@ export class QRChunkCollector {
     if (currentCount === totalCount) {
       // Reassemble in ascending order
       let fullPayload = "";
+      const isSdpStream =
+        this.chunks.get(0)?.includes("v=0") ||
+        this.chunks.get(0)?.includes("m=") ||
+        this.chunks.get(0)?.includes("a=");
+
       for (let i = 0; i < totalCount; i++) {
-        fullPayload += this.chunks.get(i) || "";
+        let part = this.chunks.get(i) || "";
+        // If an intermediate SDP chunk had its trailing CRLF stripped by camera scanner, restore newline
+        if (isSdpStream && i < totalCount - 1 && !part.endsWith("\n")) {
+          part += "\r\n";
+        }
+        fullPayload += part;
+      }
+
+      // If reassembled payload is SDP, run through sanitizer
+      if (isSdpStream) {
+        fullPayload = sanitizeSDP(fullPayload);
       }
 
       return {
