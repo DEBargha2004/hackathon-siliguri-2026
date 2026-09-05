@@ -1,13 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import jsQR from "jsqr";
-import { Camera, FlipHorizontal, X, Keyboard, CheckCircle2, Zap } from "lucide-react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Camera, FlipHorizontal, X, Keyboard, CheckCircle2, Upload, Sparkles, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRChunkCollector } from "@/lib/relay/qr-signaling";
-
-// Polyfill type for native BarcodeDetector if not standard in DOM lib
-interface NativeBarcodeDetector {
-  detect(image: ImageBitmapSource): Promise<Array<{ rawValue: string }>>;
-}
 
 export interface QRScannerViewProps {
   title?: string;
@@ -22,106 +17,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   onScanComplete,
   onCancel,
 }) => {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  // Stable unique element ID for Html5Qrcode container
+  const containerId = useRef(`html5qr-container-${Math.random().toString(36).substring(2, 9)}`).current;
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const collectorRef = useRef<QRChunkCollector>(new QRChunkCollector());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [isDetectedFlash, setIsDetectedFlash] = useState<boolean>(false);
   const [isManualInputOpen, setIsManualInputOpen] = useState<boolean>(false);
   const [manualText, setManualText] = useState<string>("");
-  const [isEngineNative, setIsEngineNative] = useState<boolean>(false);
 
-  // Cleanly stop camera
-  const stopStream = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-  }, []);
-
-  // Initialize and run the scanner loop
-  useEffect(() => {
-    let isCancelled = false;
-    collectorRef.current.reset();
-
-    // Check for native BarcodeDetector support
-    let barcodeDetector: NativeBarcodeDetector | null = null;
-    if (typeof window !== "undefined" && "BarcodeDetector" in window) {
-      try {
-        const DetectorClass = (window as unknown as { BarcodeDetector: new (opts?: { formats: string[] }) => NativeBarcodeDetector }).BarcodeDetector;
-        barcodeDetector = new DetectorClass({ formats: ["qr_code"] });
-        setIsEngineNative(true);
-      } catch {
-        barcodeDetector = null;
-        setIsEngineNative(false);
-      }
-    } else {
-      setIsEngineNative(false);
-    }
-
-    const startCamera = async () => {
-      setCameraError(null);
-      stopStream();
-
-      try {
-        if (!navigator?.mediaDevices?.getUserMedia) {
-          throw new Error("Camera streaming is not supported on this browser.");
-        }
-
-        let stream: MediaStream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: facingMode },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: false,
-          });
-        } catch {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false,
-          });
-        }
-
-        if (isCancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute("playsinline", "true");
-          await videoRef.current.play().catch(() => {});
-        }
-
-        // Start frame scan loop
-        scanFrame();
-      } catch (err) {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : "Camera permission denied or camera unavailable.";
-        setCameraError(msg);
-      }
-    };
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    let isProcessing = false;
-
-    const handleDetectedText = (text: string) => {
-      if (!text || isCancelled) return;
+  const handleDetectedText = useCallback(
+    (text: string) => {
+      if (!text) return;
       const cleanText = text.trim();
       const feedResult = collectorRef.current.feed(cleanText);
 
@@ -144,91 +56,144 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         } catch {
           // ignore
         }
-        stopStream();
-        onScanComplete(feedResult.data);
-      }
-    };
 
-    const scanFrame = async () => {
-      if (isCancelled || !videoRef.current) return;
-
-      const video = videoRef.current;
-      // readyState >= 2 (HAVE_CURRENT_DATA) ensures frames are readable
-      if (video.readyState >= 2 && !isProcessing) {
-        isProcessing = true;
-        let detected = false;
-
-        // Strategy 1: Native BarcodeDetector (GPU accelerated, handles tilt/skew/dark mode effortlessly)
-        if (barcodeDetector) {
+        // Cleanly stop scanner before notifying parent
+        if (scannerRef.current) {
           try {
-            const barcodes = await barcodeDetector.detect(video);
-            if (barcodes.length > 0 && barcodes[0].rawValue) {
-              handleDetectedText(barcodes[0].rawValue);
-              detected = true;
+            if (scannerRef.current.isScanning) {
+              scannerRef.current.stop().catch(() => {});
             }
           } catch {
-            // fallback
+            // ignore
           }
         }
-
-        // Strategy 2: High-speed jsQR fallback with attemptBoth & resolution downsampling
-        if (!detected && ctx) {
-          const vw = video.videoWidth;
-          const vh = video.videoHeight;
-
-          if (vw > 0 && vh > 0) {
-            // Downscale to max 640px to ensure 60fps throughput on CPU without frame drops
-            const maxDim = 640;
-            const scale = Math.min(1, maxDim / Math.max(vw, vh));
-            const width = Math.round(vw * scale);
-            const height = Math.round(vh * scale);
-
-            canvas.width = width;
-            canvas.height = height;
-            ctx.drawImage(video, 0, 0, width, height);
-
-            // Pass 1: Full frame scan with attemptBoth for inverted/OLED contrast
-            const fullImageData = ctx.getImageData(0, 0, width, height);
-            let code = jsQR(fullImageData.data, fullImageData.width, fullImageData.height, {
-              inversionAttempts: "attemptBoth",
-            });
-
-            // Pass 2: Center crop scan if full frame missed (focuses on target reticle)
-            if (!code) {
-              const cropSize = Math.round(Math.min(width, height) * 0.7);
-              const cropX = Math.round((width - cropSize) / 2);
-              const cropY = Math.round((height - cropSize) / 2);
-              const cropImageData = ctx.getImageData(cropX, cropY, cropSize, cropSize);
-
-              code = jsQR(cropImageData.data, cropImageData.width, cropImageData.height, {
-                inversionAttempts: "attemptBoth",
-              });
-            }
-
-            if (code && code.data) {
-              handleDetectedText(code.data);
-            }
-          }
-        }
-
-        isProcessing = false;
+        onScanComplete(feedResult.data);
       }
+    },
+    [onScanComplete]
+  );
 
-      if (!isCancelled) {
-        animationFrameRef.current = requestAnimationFrame(scanFrame);
+  // Initialize Html5Qrcode scanner lifecycle
+  useEffect(() => {
+    let isMounted = true;
+    collectorRef.current.reset();
+    setIsInitializing(true);
+    setCameraError(null);
+
+    const initScanner = async () => {
+      try {
+        // Ensure DOM container is present
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // Clean up any existing scanner instance
+        if (scannerRef.current) {
+          try {
+            if (scannerRef.current.isScanning) {
+              await scannerRef.current.stop();
+            }
+            scannerRef.current.clear();
+          } catch {
+            // ignore
+          }
+          scannerRef.current = null;
+        }
+
+        if (!isMounted) return;
+
+        const scanner = new Html5Qrcode(containerId, {
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+          verbose: false,
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+        });
+
+        scannerRef.current = scanner;
+
+        // Start optical camera scanning using html5-qrcode
+        await scanner.start(
+          { facingMode },
+          {
+            fps: 20,
+            aspectRatio: 1.333333,
+            disableFlip: facingMode === "environment",
+          },
+          (decodedText: string) => {
+            if (isMounted) {
+              handleDetectedText(decodedText);
+            }
+          },
+          () => {
+            // Non-matching frames are expected, no action needed
+          }
+        );
+
+        if (isMounted) {
+          setIsInitializing(false);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        setIsInitializing(false);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : typeof err === "string"
+            ? err
+            : "Camera permission denied or camera device unavailable.";
+        setCameraError(msg);
       }
     };
 
-    startCamera();
+    initScanner();
 
     return () => {
-      isCancelled = true;
-      stopStream();
+      isMounted = false;
+      if (scannerRef.current) {
+        const scanner = scannerRef.current;
+        scannerRef.current = null;
+        try {
+          if (scanner.isScanning) {
+            scanner.stop().then(() => scanner.clear()).catch(() => {});
+          } else {
+            scanner.clear();
+          }
+        } catch {
+          // ignore
+        }
+      }
     };
-  }, [facingMode, onScanComplete, stopStream]);
+  }, [containerId, facingMode, handleDetectedText]);
 
   const toggleFacing = () => {
     setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // Use Html5Qrcode static or instance scanFile
+      let resultText = "";
+      if (scannerRef.current) {
+        resultText = await scannerRef.current.scanFile(file, true);
+      } else {
+        const tempScanner = new Html5Qrcode(containerId);
+        resultText = await tempScanner.scanFile(file, false);
+      }
+
+      if (resultText) {
+        handleDetectedText(resultText);
+      }
+    } catch (err) {
+      alert("No valid QR code found in the selected image file.");
+      console.warn("File scan error:", err);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -237,7 +202,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
     const feedResult = collectorRef.current.feed(manualText.trim());
     if (feedResult.isComplete && feedResult.data) {
-      stopStream();
+      if (scannerRef.current?.isScanning) {
+        scannerRef.current.stop().catch(() => {});
+      }
       onScanComplete(feedResult.data);
     } else if (feedResult.progress.total > 1) {
       setChunkProgress(feedResult.progress);
@@ -247,8 +214,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-black text-white shadow-xl flex flex-col">
+      {/* Hidden File Input for Image Scanning */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+
       {/* Top Header */}
-      <div className="relative z-20 flex items-center justify-between p-3.5 bg-background/80 backdrop-blur-md border-b border-border/50">
+      <div className="relative z-20 flex items-center justify-between p-3.5 bg-background/85 backdrop-blur-md border-b border-border/50">
         <div>
           <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
             <Camera className="h-3.5 w-3.5 text-emerald-500" />
@@ -257,6 +233,15 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           <p className="text-[10px] text-muted-foreground">{description}</p>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => fileInputRef.current?.click()}
+            title="Scan from photo/screenshot"
+            className="h-7 w-7 p-0 rounded-full text-foreground hover:bg-muted"
+          >
+            <Upload className="h-3.5 w-3.5" />
+          </Button>
           <Button
             size="xs"
             variant="ghost"
@@ -282,47 +267,49 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       {/* Viewfinder Area */}
       <div className="relative aspect-[4/3] w-full bg-black flex items-center justify-center overflow-hidden">
-        {/* Flash Ping Effect */}
+        {/* Flash Ping Effect on Scan */}
         {isDetectedFlash && (
           <div className="absolute inset-0 z-30 bg-emerald-400/35 transition-opacity duration-150 pointer-events-none" />
         )}
 
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="h-full w-full object-cover"
+        {/* html5-qrcode video container */}
+        <div
+          id={containerId}
+          className="w-full h-full relative overflow-hidden flex items-center justify-center [&_video]:w-full [&_video]:h-full [&_video]:object-cover"
         />
 
-        {/* Reticle / Optical Target */}
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="relative h-56 w-56 sm:h-64 sm:w-64 rounded-2xl border-2 border-emerald-400/80 flex flex-col justify-between p-2.5 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
-            {/* Animated Laser Scanline */}
-            <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse opacity-80 top-1/2 -translate-y-1/2" />
+        {/* Loading Spinner */}
+        {isInitializing && !cameraError && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70 gap-2">
+            <RefreshCw className="h-6 w-6 text-emerald-400 animate-spin" />
+            <span className="text-xs text-muted-foreground font-mono">Initializing camera engine...</span>
+          </div>
+        )}
 
-            <div className="flex justify-between">
-              <span className="h-5 w-5 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
-              <span className="h-5 w-5 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
-            </div>
-            <div className="text-center">
-              <span className="inline-flex items-center gap-1 rounded-full bg-black/80 px-2.5 py-0.5 text-[9px] font-mono font-bold text-emerald-300 backdrop-blur-sm border border-emerald-500/30">
-                {isEngineNative ? (
-                  <>
-                    <Zap className="h-2.5 w-2.5 text-amber-400" />
-                    HW ACCELERATED
-                  </>
-                ) : (
-                  "OPTICAL RETICLE"
-                )}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="h-5 w-5 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
-              <span className="h-5 w-5 border-b-2 border-r-2 border-emerald-400 rounded-br" />
+        {/* Custom Reticle / Optical Target Overlay */}
+        {!isInitializing && !cameraError && (
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="relative h-56 w-56 sm:h-64 sm:w-64 rounded-2xl border-2 border-emerald-400/80 flex flex-col justify-between p-2.5 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+              {/* Animated Laser Scanline */}
+              <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse opacity-85 top-1/2 -translate-y-1/2" />
+
+              <div className="flex justify-between">
+                <span className="h-5 w-5 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
+                <span className="h-5 w-5 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
+              </div>
+              <div className="text-center">
+                <span className="inline-flex items-center gap-1 rounded-full bg-black/80 px-2.5 py-0.5 text-[9px] font-mono font-bold text-emerald-300 backdrop-blur-sm border border-emerald-500/30">
+                  <Sparkles className="h-2.5 w-2.5 text-emerald-400" />
+                  OPTICAL SCANNER ACTIVE
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="h-5 w-5 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
+                <span className="h-5 w-5 border-b-2 border-r-2 border-emerald-400 rounded-br" />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Multi-frame chunk progress banner */}
         {chunkProgress && chunkProgress.total > 1 && (
@@ -347,15 +334,26 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 bg-background/95 text-center text-foreground">
             <p className="text-xs font-semibold text-destructive mb-1">Camera Stream Inactive</p>
             <p className="text-[11px] text-muted-foreground max-w-xs mb-3">{cameraError}</p>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setIsManualInputOpen(true)}
-              className="rounded-full text-xs gap-1.5"
-            >
-              <Keyboard className="h-3.5 w-3.5" />
-              Paste Handshake SDP Directly
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-full text-xs gap-1.5"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Upload QR Image
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsManualInputOpen(true)}
+                className="rounded-full text-xs gap-1.5"
+              >
+                <Keyboard className="h-3.5 w-3.5" />
+                Paste SDP Text
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -363,17 +361,28 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       {/* Bottom Option Bar */}
       <div className="p-2.5 bg-background border-t border-border flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          Hold camera steady at peer QR code
+          Aim camera directly at peer QR code
         </span>
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={() => setIsManualInputOpen(!isManualInputOpen)}
-          className="text-[10px] h-6 rounded-md gap-1 text-muted-foreground hover:text-foreground"
-        >
-          <Keyboard className="h-3 w-3" />
-          Manual Input
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => fileInputRef.current?.click()}
+            className="text-[10px] h-6 rounded-md gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <Upload className="h-3 w-3" />
+            Upload Image
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => setIsManualInputOpen(!isManualInputOpen)}
+            className="text-[10px] h-6 rounded-md gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <Keyboard className="h-3 w-3" />
+            Manual
+          </Button>
+        </div>
       </div>
 
       {/* Manual Input Sheet/Drawer */}
