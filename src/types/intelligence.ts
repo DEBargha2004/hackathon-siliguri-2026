@@ -75,7 +75,11 @@ export interface HazardAnalysisResult {
   advisory: Advisory;
   advisoriesByLocale: Record<Locale, Advisory>;
   resolvedTier: AdvisoryTier;
-  tierName: "Chrome Built-in AI (Nano)" | "WebGPU in-browser (Transformers.js)" | "Deterministic Heuristic Lookup";
+  tierName:
+    | "Chrome Built-in AI (Nano)"
+    | "WebGPU in-browser (Transformers.js)"
+    | "Multilingual Situational Engine"
+    | "Deterministic Heuristic Lookup";
   metrics: {
     visionLatencyMs: number;
     fusionLatencyMs: number;

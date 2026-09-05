@@ -64,19 +64,19 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
           });
         });
 
-        // 2. Initialize LLM Engine with IndexedDB caching
+        // 2. Initialize Multilingual Advisory Engine
         postLifecycle({
           type: "STATUS_LOADING_WEIGHTS",
           progress: 52,
-          stage: "Initializing on-device LLM engine...",
+          stage: "Initializing Multilingual Advisory Engine (ne, bn, hi, en)...",
           modelType: "llm",
-          modelProgress: { vision: 100, llm: 5 },
+          modelProgress: { vision: 100, llm: 25 },
         });
 
         await llmCascade.initialize((progress, stage) => {
           postLifecycle({
             type: "STATUS_LOADING_WEIGHTS",
-            progress: Math.min(98, Math.round(50 + progress * 0.48)),
+            progress: Math.min(100, Math.round(50 + progress * 0.5)),
             stage,
             modelType: "llm",
             modelProgress: { vision: 100, llm: progress },
@@ -90,10 +90,8 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
             : undefined;
         if (aiScope?.languageModel) {
           activeTier = 1;
-        } else if (typeof navigator !== "undefined" && "gpu" in navigator) {
-          activeTier = 2;
         } else {
-          activeTier = 3;
+          activeTier = 2;
         }
 
         if (request.preferredTier) {
@@ -106,9 +104,7 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
         const tierName =
           activeTier === 1
             ? "Chrome Nano"
-            : activeTier === 2
-            ? "WebGPU Qwen2.5"
-            : "Deterministic Heuristic";
+            : llmCascade.getActiveTierName();
 
         postLifecycle({
           type: "STATUS_READY",

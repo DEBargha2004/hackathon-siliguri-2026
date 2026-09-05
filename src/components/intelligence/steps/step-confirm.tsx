@@ -111,7 +111,7 @@ export const StepConfirm: React.FC<StepConfirmProps> = ({
             >
               <div className="flex items-center gap-2">
                 <MessageSquareCode className="h-3.5 w-3.5 shrink-0" />
-                <span className="text-[11px]">3. LLM Advisory Engine (Qwen2.5 / Nano)</span>
+                <span className="text-[11px]">3. Multilingual Advisory Engine (4-Locale)</span>
               </div>
               {activeProcessingStage === "advisory" ? (
                 <RefreshCw className="h-3 w-3 animate-spin text-purple-500" />

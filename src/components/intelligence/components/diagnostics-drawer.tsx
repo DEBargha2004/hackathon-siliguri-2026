@@ -137,7 +137,7 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
               </div>
 
               <div className="p-1.5 rounded border border-border/50 bg-card/60">
-                <span className="text-muted-foreground block text-[9px]">LLM Engine (Qwen2.5 / Nano)</span>
+                <span className="text-muted-foreground block text-[9px]">Advisory Engine (Multilingual 4-Locale)</span>
                 <span className="font-mono font-bold text-foreground">
                   {cacheStats ? `${(cacheStats.llmBytes / (1024 * 1024)).toFixed(1)} MB` : "Checking..."}
                 </span>

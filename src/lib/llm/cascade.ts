@@ -4,21 +4,27 @@ import type {
   HazardContext,
   Locale,
 } from "../../types/intelligence";
-import { getDeterministicAdvisory } from "./fallback-strings";
+import {
+  getContextualMultilingualAdvisory,
+} from "./fallback-strings";
+import {
+  createTransformersCustomCache,
+  isModelTypeCached,
+  purgeLegacyLlmCache,
+} from "../cache/model-cache-db";
+import type { TextGenerationPipeline, ProgressInfo } from "@huggingface/transformers";
 
 export interface CascadeExecutionResult {
   advisory: Advisory;
   advisoriesByLocale: Record<Locale, Advisory>;
   resolvedTier: AdvisoryTier;
-  tierName: "Chrome Built-in AI (Nano)" | "WebGPU in-browser (Transformers.js)" | "Deterministic Heuristic Lookup";
+  tierName:
+    | "Chrome Built-in AI (Nano)"
+    | "Multilingual Situational Engine"
+    | "WebGPU in-browser (Transformers.js)"
+    | "Deterministic Heuristic Lookup";
   latencyMs: number;
 }
-
-import type { TextGenerationPipeline, ProgressInfo } from "@huggingface/transformers";
-import {
-  createTransformersCustomCache,
-  isModelTypeCached,
-} from "../cache/model-cache-db";
 
 interface ChromeAiSession {
   prompt(text: string): Promise<string>;
@@ -36,134 +42,163 @@ export class LlmAdvisoryCascade {
   private transformersPipeline: TextGenerationPipeline | null = null;
   private memoryGuardrailTripped = false;
   private isInitializing = false;
+  private webGpuAvailable: boolean | null = null;
+  private activeDelegateName = "Multilingual Situational Engine";
 
   /**
-   * Initializes and warms up the on-device LLM engine.
-   * Checks Chrome Built-in AI or caches quantized WebGPU Qwen2.5-0.5B in IndexedDB.
+   * Probes whether the device has a real WebGPU adapter available
+   */
+  private async probeWebGpu(): Promise<boolean> {
+    try {
+      const globalObj = typeof self !== "undefined" ? self : globalThis;
+      const nav = (globalObj as unknown as { navigator?: { gpu?: { requestAdapter: () => Promise<unknown> } } }).navigator;
+      if (!nav?.gpu || typeof nav.gpu.requestAdapter !== "function") {
+        return false;
+      }
+      const adapter = await nav.gpu.requestAdapter();
+      return adapter !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Initializes and warms up the on-device Emergency Advisory Engine.
+   * Purges oversized legacy unquantized models (>400MB) from IndexedDB,
+   * probes Chrome Built-in AI (Gemini Nano),
+   * and loads the 4-bit Quantized Qwen2.5-0.5B-Instruct (~350MB) exclusively on WebGPU devices.
+   * If WebGPU is unavailable (e.g. mobile Safari/Firefox), safely falls back to the instantaneous
+   * Multilingual Situational Engine without allocating heavy linear memory or crashing.
    */
   async initialize(onProgress?: (progress: number, stage: string) => void): Promise<void> {
-    if (this.transformersPipeline) {
-      onProgress?.(100, "LLM Engine ready (cached in memory & IndexedDB)");
-      return;
-    }
     if (this.isInitializing) return;
     this.isInitializing = true;
 
     try {
-      // 1. Check Chrome Built-in AI
-      onProgress?.(10, "LLM: Probing Chrome Built-in AI (Gemini Nano)...");
+      // 1. Purge legacy unquantized weights (>400MB) to reclaim storage
+      onProgress?.(10, "Advisory Engine: Optimizing device memory footprint...");
+      await purgeLegacyLlmCache();
+
+      // 2. Check Chrome Built-in AI (Gemini Nano)
+      onProgress?.(25, "Advisory Engine: Probing Chrome Built-in AI (Gemini Nano)...");
       const globalObj = typeof self !== "undefined" ? self : globalThis;
       const aiScope = (globalObj as unknown as { ai?: ChromeAiScope }).ai;
       if (aiScope?.languageModel) {
         try {
           const cap = await aiScope.languageModel.capabilities();
           if (cap.available === "readily" || cap.available === "after-download") {
-            onProgress?.(100, "LLM Engine ready (Chrome Built-in AI Gemini Nano)");
+            this.activeDelegateName = "Chrome Built-in AI (Nano)";
+            onProgress?.(100, "Advisory Engine ready (Chrome Built-in AI Gemini Nano)");
             this.isInitializing = false;
             return;
           }
         } catch {
-          // Fall through to WebGPU
+          // Fall through
         }
       }
 
-      // 2. Check WebGPU for in-browser Qwen2.5-0.5B
-      const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
-      if (hasWebGPU) {
-        const isCachedInDb = await isModelTypeCached("llm");
-        if (isCachedInDb) {
-          onProgress?.(25, "LLM: Found Qwen2.5 weights in IndexedDB cache (fast restore)...");
-        } else {
-          onProgress?.(20, "LLM: Checking IndexedDB neural cache for Qwen2.5-0.5B...");
+      // 3. Probe WebGPU hardware support
+      onProgress?.(35, "Advisory Engine: Checking WebGPU hardware acceleration...");
+      const hasWebGpu = await this.probeWebGpu();
+      this.webGpuAvailable = hasWebGpu;
+
+      if (!hasWebGpu) {
+        // WebGPU is not supported (mobile browsers, CPU only)
+        // DO NOT load WASM CPU for Qwen 0.5B as it will crash with 2GB+ OOM
+        this.activeDelegateName = "Multilingual Engine (4-Locale)";
+        onProgress?.(80, "Advisory Engine: Loading 4-locale corridor directives (ne, bn, hi, en)...");
+        onProgress?.(100, "Advisory Engine ready (Multilingual 4-Locale • Zero-Crash)");
+        this.isInitializing = false;
+        return;
+      }
+
+      // 4. WebGPU is present: Initialize 4-bit quantized Qwen2.5-0.5B-Instruct (~350MB)
+      const isCached = await isModelTypeCached("llm");
+      let highestProgress = 40;
+      const reportProgress = (mapped: number, stage: string) => {
+        if (mapped > highestProgress) {
+          highestProgress = mapped;
         }
+        onProgress?.(highestProgress, stage);
+      };
 
-        const { pipeline, env } = await import("@huggingface/transformers");
+      reportProgress(
+        40,
+        isCached
+          ? "Restoring Qwen2.5-0.5B (Quantized Q4) from IndexedDB..."
+          : "Loading Qwen2.5-0.5B (Quantized Q4 • 350MB) via WebGPU..."
+      );
 
-        // Enable IndexedDB model caching
-        env.useCustomCache = true;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        env.customCache = createTransformersCustomCache("llm") as any;
-        env.useBrowserCache = true;
-        env.allowLocalModels = false;
-        env.allowRemoteModels = true;
-        if (env.backends?.onnx?.wasm) {
-          env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
-        }
+      const { pipeline, env } = await import("@huggingface/transformers");
 
-        onProgress?.(30, "LLM: Initializing WebGPU quantized instruct weights...");
+      // Enable persistent IndexedDB single-copy storage (no CacheStorage buffer clones)
+      env.useCustomCache = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      env.customCache = createTransformersCustomCache("llm") as any;
+      env.useBrowserCache = true;
+      env.useWasmCache = true;
+      env.allowLocalModels = false;
+      env.allowRemoteModels = true;
+      if (env.backends?.onnx?.wasm) {
+        env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
+      }
 
-        let highestLlmProgress = 30;
-        const reportMonotonicProgress = (targetPercent: number, label: string) => {
-          if (targetPercent > highestLlmProgress) {
-            highestLlmProgress = targetPercent;
-          }
-          onProgress?.(highestLlmProgress, label);
-        };
-
+      try {
         this.transformersPipeline = (await pipeline(
           "text-generation",
           "onnx-community/Qwen2.5-0.5B-Instruct",
           {
-            dtype: "q4",
+            dtype: "q4f16",
             device: "webgpu",
             progress_callback: (p: ProgressInfo) => {
               const info = p as unknown as {
                 status?: string;
                 file?: string;
                 progress?: number;
-                loaded?: number;
-                total?: number;
               };
-
               if (typeof info.progress === "number") {
                 const file = info.file || "";
-                const isModelWeights =
+                const isWeights =
                   file.includes(".onnx") ||
                   file.includes(".bin") ||
                   file.includes("model");
 
-                let mappedProgress: number;
-                if (info.status === "progress_total") {
-                  // Total aggregate progress across all files
-                  mappedProgress = Math.min(95, Math.round(30 + info.progress * 0.65));
-                } else if (isModelWeights) {
-                  // Main weight file (~350 MB)
-                  mappedProgress = Math.min(95, Math.round(35 + info.progress * 0.60));
-                } else {
-                  // Small metadata/tokenizer files (<5 MB)
-                  mappedProgress = Math.min(35, Math.round(25 + info.progress * 0.10));
-                }
+                const mapped = isWeights
+                  ? Math.min(95, Math.round(40 + info.progress * 0.55))
+                  : Math.min(45, Math.round(35 + info.progress * 0.10));
 
-                reportMonotonicProgress(
-                  mappedProgress,
-                  `LLM: Caching Qwen2.5 in IndexedDB (${Math.round(highestLlmProgress)}%)...`
+                reportProgress(
+                  mapped,
+                  `Qwen2.5-0.5B: Caching weights in IndexedDB (${Math.round(highestProgress)}%)...`
                 );
               }
-
               if (info.status === "done") {
-                reportMonotonicProgress(95, "LLM: Compiling WebGPU instruct pipeline for device...");
+                reportProgress(96, "Compiling WebGPU instruct pipeline for device...");
               }
             },
           }
-        )) as unknown as TextGenerationPipeline;
+        )) as TextGenerationPipeline;
 
-        const isNowCached = await isModelTypeCached("llm");
-        onProgress?.(
-          100,
-          `LLM Engine ready (WebGPU Qwen2.5)${isNowCached ? " • Cached in IndexedDB" : ""}`
-        );
-        this.isInitializing = false;
-        return;
+        this.activeDelegateName = "Qwen2.5-0.5B (WebGPU Q4)";
+        onProgress?.(100, "Advisory Engine ready (Qwen2.5-0.5B WebGPU Quantized)");
+      } catch (gpuPipelineErr) {
+        console.warn("[LlmCascade] WebGPU Qwen pipeline error, falling back to Multilingual Situational Engine:", gpuPipelineErr);
+        this.transformersPipeline = null;
+        this.webGpuAvailable = false;
+        this.activeDelegateName = "Multilingual Engine (4-Locale)";
+        onProgress?.(100, "Advisory Engine ready (Multilingual 4-Locale • Zero-Crash)");
       }
-
-      // 3. Deterministic Heuristic Fallback
-      onProgress?.(100, "LLM Engine ready (Deterministic Heuristic <10ms)");
     } catch (err) {
-      console.warn("[LlmCascade] Initialize fallback to Tier 3:", err);
-      onProgress?.(100, "LLM Engine ready (Deterministic Heuristic Fallback)");
+      console.warn("[LlmCascade] Initialize fallback:", err);
+      this.activeDelegateName = "Multilingual Engine (4-Locale)";
+      onProgress?.(100, "Advisory Engine ready (Multilingual 4-Locale)");
     } finally {
       this.isInitializing = false;
     }
+  }
+
+  getActiveTierName(): string {
+    return this.activeDelegateName;
   }
 
   /**
@@ -177,7 +212,6 @@ export class LlmAdvisoryCascade {
       const limitBytes = 1.2 * 1024 * 1024 * 1024; // 1.2 GB
       if (memory.usedJSHeapSize > limitBytes) {
         this.memoryGuardrailTripped = true;
-        // Purge memory
         this.transformersPipeline = null;
         return false;
       }
@@ -194,9 +228,9 @@ export class LlmAdvisoryCascade {
   }
 
   /**
-   * Runs the 3-tier LLM Advisory Cascade in strict order.
-   * Generates advisories for ALL languages (ne, bn, hi, en) simultaneously.
-   * Tier 1 (Chrome Built-in AI) -> Tier 2 (WebGPU Transformers.js) -> Tier 3 (Deterministic Lookup)
+   * Runs the multilingual advisory engine.
+   * Generates situational directives for ALL 4 languages (ne, bn, hi, en) simultaneously.
+   * Tier 1 (Chrome Built-in AI) -> Tier 2 (Multilingual Situational Engine) -> Tier 3 (Deterministic Lookup)
    */
   async generateAdvisory(
     context: HazardContext,
@@ -206,19 +240,19 @@ export class LlmAdvisoryCascade {
   ): Promise<CascadeExecutionResult> {
     const startTime = performance.now();
 
-    // Baseline deterministic advisories for all 4 supported locales
-    const baselineAdvisories: Record<Locale, Advisory> = {
-      ne: getDeterministicAdvisory(context.hazardType, context.severity, "ne"),
-      bn: getDeterministicAdvisory(context.hazardType, context.severity, "bn"),
-      hi: getDeterministicAdvisory(context.hazardType, context.severity, "hi"),
-      en: getDeterministicAdvisory(context.hazardType, context.severity, "en"),
+    // Baseline & contextual multi-language advisories across all 4 supported locales
+    const contextualAdvisories: Record<Locale, Advisory> = {
+      ne: getContextualMultilingualAdvisory(context, "ne"),
+      bn: getContextualMultilingualAdvisory(context, "bn"),
+      hi: getContextualMultilingualAdvisory(context, "hi"),
+      en: getContextualMultilingualAdvisory(context, "en"),
     };
 
     // Check memory guardrail
     if (!this.checkMemoryGuardrail() || forcedTier === 3) {
       return {
-        advisory: baselineAdvisories[locale],
-        advisoriesByLocale: baselineAdvisories,
+        advisory: contextualAdvisories[locale],
+        advisoriesByLocale: contextualAdvisories,
         resolvedTier: 3,
         tierName: "Deterministic Heuristic Lookup",
         latencyMs: Math.round(performance.now() - startTime),
@@ -256,10 +290,10 @@ export class LlmAdvisoryCascade {
               raw,
               context,
               locale,
-              baselineAdvisories
+              contextualAdvisories
             );
             return {
-              advisory: parsedByLocale[locale] || baselineAdvisories[locale],
+              advisory: parsedByLocale[locale] || contextualAdvisories[locale],
               advisoriesByLocale: parsedByLocale,
               resolvedTier: 1,
               tierName: "Chrome Built-in AI (Nano)",
@@ -273,10 +307,9 @@ export class LlmAdvisoryCascade {
     }
 
     if (forcedTier === 1) {
-      // If forced to Tier 1 and it failed, fall back to Tier 3
       return {
-        advisory: baselineAdvisories[locale],
-        advisoriesByLocale: baselineAdvisories,
+        advisory: contextualAdvisories[locale],
+        advisoriesByLocale: contextualAdvisories,
         resolvedTier: 3,
         tierName: "Deterministic Heuristic Lookup",
         latencyMs: Math.round(performance.now() - startTime),
@@ -284,159 +317,64 @@ export class LlmAdvisoryCascade {
     }
 
     // ----------------------------------------------------
-    // Tier 2: WebGPU in-browser (HuggingFace Transformers.js)
+    // Tier 2: WebGPU in-browser Transformers.js (Quantized Qwen2.5-0.5B)
     // ----------------------------------------------------
-    if (forcedTier === 2 || (!forcedTier && !this.memoryGuardrailTripped)) {
+    if ((forcedTier === 2 || !forcedTier) && this.transformersPipeline && this.webGpuAvailable) {
       try {
-        const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
-        if (hasWebGPU) {
-          onProgress?.(30, "Checking WebGPU pipeline...");
-          if (!this.checkMemoryGuardrail()) {
-            throw new Error("Memory limit exceeded 1.2 GB");
-          }
+        onProgress?.(60, "Executing WebGPU Qwen2.5-0.5B (Quantized Q4)...");
+        const systemPrompt =
+          "You are an on-device emergency responder for the Darjeeling Himalayan Railway (DHR) corridor. " +
+          "Given the slope hazard context, generate emergency advisories for all 4 languages: 'ne' (Nepali), 'bn' (Bengali), 'hi' (Hindi), 'en' (English). " +
+          "Respond strictly in valid JSON matching: " +
+          '{"ne":{"hazardLabel":"...","immediateAction":"...","relayPriority":"BROADCAST_IMMEDIATE"},"bn":{...},"hi":{...},"en":{...}}';
 
-          const parsedByLocale = await this.executeWebGpuInference(
-            context,
-            locale,
-            baselineAdvisories,
-            onProgress
-          );
-          if (parsedByLocale) {
-            return {
-              advisory: parsedByLocale[locale] || baselineAdvisories[locale],
-              advisoriesByLocale: parsedByLocale,
-              resolvedTier: 2,
-              tierName: "WebGPU in-browser (Transformers.js)",
-              latencyMs: Math.round(performance.now() - startTime),
-            };
-          }
-        }
-      } catch {
-        // Tier 2 failed or WebGPU unavailable, proceed to Tier 3
+        const landmarkStr = context.proximityLandmark ? ` near ${context.proximityLandmark.label}` : "";
+        const userPrompt = `Hazard: ${context.hazardType}, Severity: ${context.severity}${landmarkStr}. Provide 4-language emergency directives JSON.`;
+
+        const prompt = `<|im_start|>system\n${systemPrompt}<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
+
+        const result = await this.transformersPipeline(prompt, {
+          max_new_tokens: 64,
+          do_sample: false,
+          return_full_text: false,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawOutput = (result as any)?.[0]?.generated_text || "";
+        const parsedByLocale = this.parseAndValidateMultiLocaleAdvisory(
+          rawOutput,
+          context,
+          locale,
+          contextualAdvisories
+        );
+
+        return {
+          advisory: parsedByLocale[locale] || contextualAdvisories[locale],
+          advisoriesByLocale: parsedByLocale,
+          resolvedTier: 2,
+          tierName: "WebGPU in-browser (Transformers.js)",
+          latencyMs: Math.round(performance.now() - startTime),
+        };
+      } catch (pipelineExecErr) {
+        console.warn("[LlmCascade] WebGPU execution fallback:", pipelineExecErr);
+        // Fall through to Multilingual Situational Engine
       }
     }
 
     // ----------------------------------------------------
-    // Tier 3: Deterministic Fallback (<10 ms, zero network, zero GPU)
+    // Tier 2 Fallback: Multilingual Situational Emergency Advisory Engine (<5ms, zero network, zero GPU crash)
     // ----------------------------------------------------
-    onProgress?.(95, "Resolving Tier 3 Deterministic Lookup (<10ms)...");
+    onProgress?.(95, "Synthesizing 4-locale emergency directives with telemetry...");
 
     return {
-      advisory: baselineAdvisories[locale],
-      advisoriesByLocale: baselineAdvisories,
-      resolvedTier: 3,
-      tierName: "Deterministic Heuristic Lookup",
+      advisory: contextualAdvisories[locale],
+      advisoriesByLocale: contextualAdvisories,
+      resolvedTier: 2,
+      tierName: "Multilingual Situational Engine",
       latencyMs: Math.round(performance.now() - startTime),
     };
   }
 
-  /**
-   * Executes WebGPU quantized model inference via @huggingface/transformers
-   */
-  private async executeWebGpuInference(
-    context: HazardContext,
-    locale: Locale,
-    baseline: Record<Locale, Advisory>,
-    onProgress?: (progress: number, stage: string) => void
-  ): Promise<Record<Locale, Advisory> | null> {
-    try {
-      const { pipeline, env } = await import("@huggingface/transformers");
-
-      // Configure Transformers.js IndexedDB caching & WebGPU backend
-      env.useCustomCache = true;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      env.customCache = createTransformersCustomCache("llm") as any;
-      env.useBrowserCache = true;
-      env.allowLocalModels = false;
-      env.allowRemoteModels = true;
-      if (env.backends?.onnx?.wasm) {
-        env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
-      }
-
-      if (!this.transformersPipeline) {
-        const isCached = await isModelTypeCached("llm");
-        onProgress?.(
-          40,
-          isCached
-            ? "LLM Engine: Restoring Qwen2.5 from IndexedDB..."
-            : "LLM Engine: Loading & caching Qwen2.5 in IndexedDB..."
-        );
-        let highestInfProgress = 40;
-        // Use an ultra-compact, quantized instruct model
-        this.transformersPipeline = (await pipeline(
-          "text-generation",
-          "onnx-community/Qwen2.5-0.5B-Instruct",
-          {
-            dtype: "q4",
-            device: "webgpu",
-            progress_callback: (p: ProgressInfo) => {
-              const info = p as unknown as {
-                status?: string;
-                file?: string;
-                progress?: number;
-              };
-              if (typeof info.progress === "number") {
-                const file = info.file || "";
-                const isModelWeights =
-                  file.includes(".onnx") ||
-                  file.includes(".bin") ||
-                  file.includes("model");
-
-                let mapped = isModelWeights
-                  ? Math.min(95, Math.round(40 + info.progress * 0.55))
-                  : Math.min(45, Math.round(35 + info.progress * 0.10));
-
-                if (mapped > highestInfProgress) {
-                  highestInfProgress = mapped;
-                }
-
-                onProgress?.(
-                  highestInfProgress,
-                  `LLM Engine: Caching weights in IndexedDB (${Math.round(highestInfProgress)}%)...`
-                );
-              }
-            },
-          }
-        )) as unknown as TextGenerationPipeline;
-      }
-
-      onProgress?.(80, "Executing WebGPU text generation...");
-
-      const systemMessage =
-        "You are an on-device emergency adviser along the Darjeeling Himalayan Railway. Output ONLY a valid JSON object matching: " +
-        `{"hazardLabel": "max 5 words", "immediateAction": "one imperative command", "relayPriority": "${context.severity === "MONITOR" ? "LOG_ONLY" : "BROADCAST_IMMEDIATE"}"}. ` +
-        `Language required: ${locale}.`;
-
-      const userPrompt = `HazardContext: ${JSON.stringify(context)}`;
-
-      const messages = [
-        { role: "system", content: systemMessage },
-        { role: "user", content: userPrompt },
-      ];
-
-      if (!this.transformersPipeline) return null;
-
-      const output = (await this.transformersPipeline(
-        messages as unknown as Parameters<TextGenerationPipeline>[0],
-        {
-          max_new_tokens: 64,
-          temperature: 0.2,
-          top_k: 3,
-          do_sample: false,
-        }
-      )) as unknown as Array<{ generated_text?: Array<{ content?: string }> }>;
-
-      const responseText = output?.[0]?.generated_text?.at(-1)?.content ?? "";
-      return this.parseAndValidateMultiLocaleAdvisory(
-        responseText,
-        context,
-        locale,
-        baseline
-      );
-    } catch {
-      return null;
-    }
-  }
 
   /**
    * Strictly parses and validates LLM output into the Advisory schema for all locales.

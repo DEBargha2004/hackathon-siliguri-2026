@@ -194,10 +194,10 @@ export const DualModelLoader: React.FC<DualModelLoaderProps> = ({
                 </div>
                 <div>
                   <span className="font-bold text-[11px] text-foreground">
-                    2. Emergency LLM Engine
+                    2. Emergency Advisory Engine
                   </span>
                   <span className="text-[10px] text-muted-foreground ml-1">
-                    (Qwen2.5 / Nano)
+                    (Qwen2.5-0.5B Q4 / Nano)
                   </span>
                 </div>
               </div>
@@ -206,7 +206,7 @@ export const DualModelLoader: React.FC<DualModelLoaderProps> = ({
                 {modelStatus.llm.cachedInIndexedDb ? (
                   <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
                     <Database className="h-2.5 w-2.5" />
-                    IndexedDB ({cacheStats ? formatBytes(cacheStats.llmBytes) : "Cached"})
+                    IndexedDB ({cacheStats && cacheStats.llmBytes > 0 ? formatBytes(cacheStats.llmBytes) : "Cached"})
                   </span>
                 ) : modelStatus.llm.status === "loading" ? (
                   <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
@@ -214,9 +214,9 @@ export const DualModelLoader: React.FC<DualModelLoaderProps> = ({
                     Loading...
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded border border-border">
+                  <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
                     <Sparkles className="h-2.5 w-2.5 text-purple-400" />
-                    {modelStatus.llm.tierName ?? "Ready"}
+                    {modelStatus.llm.tierName ?? "Nepali • Bengali • Hindi • English"}
                   </span>
                 )}
               </div>

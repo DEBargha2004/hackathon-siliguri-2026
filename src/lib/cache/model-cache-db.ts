@@ -197,8 +197,9 @@ export function createTransformersCustomCache(
           cachedAt: Date.now(),
         });
 
-        // Mirror into Cache Storage if available
-        if (typeof caches !== "undefined") {
+        // Mirror into Cache Storage only for small metadata files (< 10 MB).
+        // Never clone heavy model weight buffers (e.g. 350MB Qwen weights) to prevent worker heap spikes and OOM crashes.
+        if (typeof caches !== "undefined" && buffer.byteLength < 10 * 1024 * 1024) {
           try {
             const cacheKey = "transformers-cache";
             const browserCache = await caches.open(cacheKey);
@@ -236,6 +237,71 @@ export function createTransformersCustomCache(
       }
     },
   };
+}
+
+/**
+ * Purges legacy unquantized/oversized LLM records (>400MB) from older runs to reclaim device memory,
+ * while preserving optimized 4-bit quantized Qwen files (~350MB total).
+ */
+export async function purgeLegacyLlmCache(): Promise<number> {
+  try {
+    const db = await getModelDB();
+    const records = await db.getAll(MODEL_STORE_NAME);
+    let purgedBytes = 0;
+
+    for (const record of records) {
+      const isLlm = record.modelType === "llm" || classifyModelType(record.url) === "llm";
+      // Unquantized Qwen weights exceeded 400MB; 4-bit quantized shards are smaller
+      const isOversized = record.byteLength > 400 * 1024 * 1024;
+      const isUnquantizedOnnx = record.url.includes("model.onnx") && !record.url.includes("q4");
+
+      if (isLlm && (isOversized || isUnquantizedOnnx)) {
+        purgedBytes += record.byteLength || 0;
+        await db.delete(MODEL_STORE_NAME, record.url);
+      }
+    }
+
+    return purgedBytes;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Purges all LLM weights from IndexedDB and browser cache storage
+ */
+export async function purgeLlmCache(): Promise<number> {
+  try {
+    const db = await getModelDB();
+    const records = await db.getAll(MODEL_STORE_NAME);
+    let purgedBytes = 0;
+
+    for (const record of records) {
+      if (record.modelType === "llm" || classifyModelType(record.url) === "llm") {
+        purgedBytes += record.byteLength || 0;
+        await db.delete(MODEL_STORE_NAME, record.url);
+      }
+    }
+
+    // Also clean from browser Cache Storage if present
+    if (typeof caches !== "undefined") {
+      try {
+        const browserCache = await caches.open("transformers-cache");
+        const keys = await browserCache.keys();
+        for (const req of keys) {
+          if (classifyModelType(req.url) === "llm") {
+            await browserCache.delete(req);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return purgedBytes;
+  } catch {
+    return 0;
+  }
 }
 
 export interface ModelCacheStats {
