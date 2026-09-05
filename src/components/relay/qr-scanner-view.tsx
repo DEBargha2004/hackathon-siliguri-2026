@@ -34,8 +34,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const handleDetectedText = useCallback(
     (text: string) => {
       if (!text) return;
-      const cleanText = text.trim();
-      const feedResult = collectorRef.current.feed(cleanText);
+      // Do not use text.trim() because it strips trailing \r\n from chunk payloads
+      const feedResult = collectorRef.current.feed(text);
 
       if (feedResult.progress.total > 1) {
         setChunkProgress(feedResult.progress);
@@ -198,9 +198,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualText.trim()) return;
+    if (!manualText) return;
 
-    const feedResult = collectorRef.current.feed(manualText.trim());
+    const feedResult = collectorRef.current.feed(manualText);
     if (feedResult.isComplete && feedResult.data) {
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(() => {});

@@ -15,10 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import type { OfficialAlert, TransferProgress } from "@/types/alert";
 import { canRelayAlert } from "@/lib/relay/alert-store";
-import {
-  prepareQRFrames,
-  renderQRCodeDataUrl,
-} from "@/lib/relay/qr-signaling";
+import { prepareQRFrames, renderQRCodeDataUrl } from "@/lib/relay/qr-signaling";
 import {
   initHostPeer,
   type HostPeerSession,
@@ -45,13 +42,15 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
 
   const [session, setSession] = useState<HostPeerSession | null>(null);
-  const [connState, setConnState] = useState<PeerConnectionState>("INITIALIZING");
+  const [connState, setConnState] =
+    useState<PeerConnectionState>("INITIALIZING");
   const [qrDataUrls, setQrDataUrls] = useState<string[]>([]);
   const [currentFrameIndex, setCurrentFrameIndex] = useState<number>(0);
   const [isAnimationPaused, setIsAnimationPaused] = useState<boolean>(false);
   const [copiedOffer, setCopiedOffer] = useState<boolean>(false);
 
-  const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
+  const [transferProgress, setTransferProgress] =
+    useState<TransferProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const sessionRef = useRef<HostPeerSession | null>(null);
@@ -115,7 +114,10 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
         const frames = prepareQRFrames(hostSession.offerSdp);
         const renderedUrls: string[] = [];
         for (const frame of frames) {
-          const url = await renderQRCodeDataUrl(frame, { width: 360, margin: 4 });
+          const url = await renderQRCodeDataUrl(frame, {
+            width: 360,
+            margin: 4,
+          });
           renderedUrls.push(url);
         }
 
@@ -125,7 +127,10 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
         }
       } catch (err) {
         if (!isCancelled) {
-          const msg = err instanceof Error ? err.message : "Failed to initialize WebRTC Host";
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Failed to initialize WebRTC Host";
           setErrorMessage(msg);
         }
       }
@@ -178,7 +183,10 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
             resolve();
           };
           activeChannel.addEventListener("open", onOpen);
-          setTimeout(() => reject(new Error("DataChannel open timed out.")), 6000);
+          setTimeout(
+            () => reject(new Error("DataChannel open timed out.")),
+            6000,
+          );
         });
       }
 
@@ -218,7 +226,9 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="text-sm font-bold tracking-tight">Host Alert Relay</h3>
+                <h3 className="text-sm font-bold tracking-tight">
+                  Host Alert Relay
+                </h3>
                 <span className="text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded-full bg-muted-foreground/10 text-muted-foreground">
                   {connState}
                 </span>
@@ -254,12 +264,19 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
               <div className="mx-auto h-12 w-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600">
                 <AlertTriangle className="h-6 w-6" />
               </div>
-              <h4 className="text-sm font-bold text-foreground">Relay Cap Enforced</h4>
+              <h4 className="text-sm font-bold text-foreground">
+                Relay Cap Enforced
+              </h4>
               <p className="text-xs text-muted-foreground max-w-xs mx-auto">
                 {blockedReason}
               </p>
               <div className="pt-2">
-                <Button size="sm" variant="outline" onClick={onClose} className="rounded-xl text-xs">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onClose}
+                  className="rounded-xl text-xs"
+                >
                   Acknowledge & Close
                 </Button>
               </div>
@@ -274,7 +291,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                   Step 1 of 2: Receiver Scans Host
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Ask the offline phone to open "Receive Alert" and point their camera at this QR code.
+                  Ask the offline phone to open "Receive Alert" and point their
+                  camera at this QR code.
                 </p>
               </div>
 
@@ -297,7 +315,7 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
 
                 {/* Animated frame badge if multi-frame */}
                 {qrDataUrls.length > 1 && (
-                  <div className="absolute bottom-2 rounded-full bg-black/85 px-3 py-0.5 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-md">
+                  <div className="absolute bottom-0.5 rounded-full bg-black/85 px-3 py-0.5 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-md">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
                     Frame {currentFrameIndex + 1} of {qrDataUrls.length}
                   </div>
@@ -312,7 +330,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                     variant="outline"
                     onClick={() =>
                       setCurrentFrameIndex(
-                        (prev) => (prev - 1 + qrDataUrls.length) % qrDataUrls.length
+                        (prev) =>
+                          (prev - 1 + qrDataUrls.length) % qrDataUrls.length,
                       )
                     }
                     className="text-[10px] h-7 rounded-lg gap-1 px-2"
@@ -328,7 +347,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                   >
                     {isAnimationPaused ? (
                       <>
-                        <Play className="h-3 w-3 text-emerald-600" /> Resume Cycle
+                        <Play className="h-3 w-3 text-emerald-600" /> Resume
+                        Cycle
                       </>
                     ) : (
                       <>
@@ -341,7 +361,7 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                     variant="outline"
                     onClick={() =>
                       setCurrentFrameIndex(
-                        (prev) => (prev + 1) % qrDataUrls.length
+                        (prev) => (prev + 1) % qrDataUrls.length,
                       )
                     }
                     className="text-[10px] h-7 rounded-lg gap-1 px-2"
@@ -385,7 +405,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                   Step 2 of 2: Scan Receiver's Screen
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Point this camera at the Answer QR shown on the receiver's phone.
+                  Point this camera at the Answer QR shown on the receiver's
+                  phone.
                 </p>
               </div>
 
@@ -420,7 +441,8 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                   Streaming Alert & Photo over DataChannel
                 </h4>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Direct peer-to-peer transmission with SCTP backpressure control
+                  Direct peer-to-peer transmission with SCTP backpressure
+                  control
                 </p>
               </div>
 
@@ -459,13 +481,16 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                   Alert Successfully Relayed!
                 </h4>
                 <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                  Official advisory and full-resolution evidence photo delivered to peer device.
+                  Official advisory and full-resolution evidence photo delivered
+                  to peer device.
                 </p>
               </div>
 
               <div className="rounded-xl border border-border bg-muted/30 p-3 text-left space-y-1.5 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Original Hop Count:</span>
+                  <span className="text-muted-foreground">
+                    Original Hop Count:
+                  </span>
                   <span className="font-mono font-bold">{alert.hopCount}</span>
                 </div>
                 <div className="flex justify-between">
@@ -476,7 +501,9 @@ export const HostRelayDialog: React.FC<HostRelayDialogProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Evidence Photo:</span>
-                  <span className="font-semibold text-emerald-600">Verified & Intact</span>
+                  <span className="font-semibold text-emerald-600">
+                    Verified & Intact
+                  </span>
                 </div>
               </div>
 

@@ -15,10 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { OfficialAlert, TransferProgress } from "@/types/alert";
-import {
-  prepareQRFrames,
-  renderQRCodeDataUrl,
-} from "@/lib/relay/qr-signaling";
+import { prepareQRFrames, renderQRCodeDataUrl } from "@/lib/relay/qr-signaling";
 import {
   initReceiverPeer,
   type ReceiverPeerSession,
@@ -42,15 +39,19 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   const [session, setSession] = useState<ReceiverPeerSession | null>(null);
-  const [connState, setConnState] = useState<PeerConnectionState>("INITIALIZING");
+  const [connState, setConnState] =
+    useState<PeerConnectionState>("INITIALIZING");
   const [qrDataUrls, setQrDataUrls] = useState<string[]>([]);
   const [currentFrameIndex, setCurrentFrameIndex] = useState<number>(0);
   const [isAnimationPaused, setIsAnimationPaused] = useState<boolean>(false);
   const [copiedAnswer, setCopiedAnswer] = useState<boolean>(false);
 
-  const [receivedAlert, setReceivedAlert] = useState<OfficialAlert | null>(null);
+  const [receivedAlert, setReceivedAlert] = useState<OfficialAlert | null>(
+    null,
+  );
   const [isDuplicate, setIsDuplicate] = useState<boolean>(false);
-  const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
+  const [transferProgress, setTransferProgress] =
+    useState<TransferProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [receivedPhotoUrl, setReceivedPhotoUrl] = useState<string | null>(null);
 
@@ -156,7 +157,8 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
       setStep(4); // Transfer completed!
       onAlertReceived?.(result.alert);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Handshake or transfer failed";
+      const msg =
+        err instanceof Error ? err.message : "Handshake or transfer failed";
       setErrorMessage(msg);
       setStep(1); // Allow retry scan
     }
@@ -182,7 +184,9 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="text-sm font-bold tracking-tight">Receive Official Alert</h3>
+                <h3 className="text-sm font-bold tracking-tight">
+                  Receive Official Alert
+                </h3>
                 <span className="text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded-full bg-muted-foreground/10 text-muted-foreground">
                   {connState}
                 </span>
@@ -220,7 +224,8 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
                   Step 1 of 2: Scan Host Phone
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Aim this camera at the Offer QR code displayed on the sender's phone.
+                  Aim this camera at the Offer QR code displayed on the sender's
+                  phone.
                 </p>
               </div>
 
@@ -241,7 +246,8 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
                   Step 2 of 2: Host Scans Your Phone
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Show this Answer QR to the sender's phone to open the WebRTC DataChannel.
+                  Show this Answer QR to the sender's phone to open the WebRTC
+                  DataChannel.
                 </p>
               </div>
 
@@ -264,7 +270,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
 
                 {/* Animated frame badge if multi-frame */}
                 {qrDataUrls.length > 1 && (
-                  <div className="absolute bottom-2 rounded-full bg-black/85 px-3 py-0.5 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-md">
+                  <div className="absolute bottom-0.5 rounded-full bg-black/85 px-3 py-0.5 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-md">
                     <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />
                     Frame {currentFrameIndex + 1} of {qrDataUrls.length}
                   </div>
@@ -279,7 +285,8 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
                     variant="outline"
                     onClick={() =>
                       setCurrentFrameIndex(
-                        (prev) => (prev - 1 + qrDataUrls.length) % qrDataUrls.length
+                        (prev) =>
+                          (prev - 1 + qrDataUrls.length) % qrDataUrls.length,
                       )
                     }
                     className="text-[10px] h-7 rounded-lg gap-1 px-2"
@@ -308,7 +315,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
                     variant="outline"
                     onClick={() =>
                       setCurrentFrameIndex(
-                        (prev) => (prev + 1) % qrDataUrls.length
+                        (prev) => (prev + 1) % qrDataUrls.length,
                       )
                     }
                     className="text-[10px] h-7 rounded-lg gap-1 px-2"
@@ -381,7 +388,9 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
 
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-foreground">
-                  {isDuplicate ? "Duplicate Alert Acknowledged" : "Official Alert Received!"}
+                  {isDuplicate
+                    ? "Duplicate Alert Acknowledged"
+                    : "Official Alert Received!"}
                 </h4>
                 <p className="text-xs text-muted-foreground max-w-xs mx-auto">
                   {isDuplicate

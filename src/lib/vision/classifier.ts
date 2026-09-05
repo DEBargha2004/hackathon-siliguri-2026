@@ -47,6 +47,7 @@ export class VisionHazardClassifier {
       onProgress?.(22, "Vision Model: Loading neural vision classifier (MobileNetV4)...");
 
       const loadPipeline = async (device: "webgpu" | "wasm") => {
+        let highestVisionProgress = 25;
         return (await pipeline(
           "image-classification",
           "onnx-community/mobilenetv4_conv_small.e2400_r224_in1k",
@@ -54,13 +55,30 @@ export class VisionHazardClassifier {
             device,
             progress_callback: (p: ProgressInfo) => {
               if (this.isInitialized) return;
-              if ("progress" in p && typeof p.progress === "number") {
+              const info = p as unknown as {
+                status?: string;
+                file?: string;
+                progress?: number;
+              };
+              if (typeof info.progress === "number") {
+                const file = info.file || "";
+                const isModelWeights = file.includes(".onnx") || file.includes("model");
+
+                let mapped = isModelWeights
+                  ? Math.min(90, Math.round(30 + info.progress * 0.58))
+                  : Math.min(30, Math.round(20 + info.progress * 0.10));
+
+                if (mapped > highestVisionProgress) {
+                  highestVisionProgress = mapped;
+                }
+
                 onProgress?.(
-                  Math.min(90, Math.round(25 + p.progress * 0.55)),
-                  `Vision Model: Caching weights in IndexedDB (${Math.round(p.progress)}%)...`
+                  highestVisionProgress,
+                  `Vision Model: Caching weights in IndexedDB (${Math.round(highestVisionProgress)}%)...`
                 );
               }
-              if ("status" in p && (p as unknown as { status: string }).status === "done") {
+              if (info.status === "done") {
+                if (highestVisionProgress < 85) highestVisionProgress = 85;
                 onProgress?.(85, "Vision Model: Compiling neural vision graph for device...");
               }
             },

@@ -109,16 +109,17 @@ export function useHazardWorker(options?: UseHazardWorkerOptions) {
 
         case "STATUS_LOADING_WEIGHTS":
           setLifecycleState((current) => (current === "READY" ? current : "LOADING"));
-          setLoadingProgress(msg.progress);
+          setLoadingProgress((current) => Math.max(current, msg.progress));
           setLoadingStage(msg.stage);
 
           setModelStatus((prev) => {
             const next = { ...prev };
             if (msg.modelType === "vision") {
+              const incoming = msg.modelProgress?.vision ?? msg.progress;
               next.vision = {
                 ...next.vision,
                 status: "loading",
-                progress: msg.modelProgress?.vision ?? msg.progress,
+                progress: Math.max(prev.vision.progress, incoming),
                 stage: msg.stage,
               };
             } else if (msg.modelType === "llm") {
@@ -127,10 +128,11 @@ export function useHazardWorker(options?: UseHazardWorkerOptions) {
                 status: "ready",
                 progress: 100,
               };
+              const incoming = msg.modelProgress?.llm ?? msg.progress;
               next.llm = {
                 ...next.llm,
                 status: "loading",
-                progress: msg.modelProgress?.llm ?? msg.progress,
+                progress: Math.max(prev.llm.progress, incoming),
                 stage: msg.stage,
               };
             }

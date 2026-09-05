@@ -1,5 +1,6 @@
 import {
   compactSDP,
+  sanitizeSDP,
   prepareQRFrames,
   parseQRFrame,
   QRChunkCollector,
@@ -47,6 +48,15 @@ const compacted = compactSDP(rawSdp);
 assert(!compacted.includes("a=extmap:"), "Compacted SDP strips unnecessary a=extmap lines");
 assert(compacted.includes("a=candidate:1"), "Compacted SDP preserves essential host candidates");
 assert(compacted.includes("a=sctp-port:5000"), "Compacted SDP preserves SCTP configuration");
+assert(compacted.endsWith("\r\n"), "Compacted SDP strictly terminates with mandatory CRLF");
+
+// Test corrupted / concatenated SDP lines (the exact issue reported by user)
+const corruptedSdp = "v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\na=mid:0a=max-message-size:.....a=candidate:1 1 UDP 123 192.168.1.1 5000 typ host";
+const sanitized = sanitizeSDP(corruptedSdp);
+assert(sanitized.includes("a=mid:0\r\n"), "SanitizeSDP splits concatenated lines before a=mid:0");
+assert(sanitized.includes("a=max-message-size:262144\r\n"), "SanitizeSDP repairs corrupted a=max-message-size:..... to standard 262144");
+assert(sanitized.includes("a=candidate:1"), "SanitizeSDP preserves candidate line after repaired boundary");
+assert(sanitized.endsWith("\r\n"), "SanitizeSDP ensures trailing CRLF");
 
 // ----------------------------------------------------
 // 2. Optical QR Signaling: Single vs Multi-Frame Chunking

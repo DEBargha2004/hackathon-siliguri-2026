@@ -1,4 +1,4 @@
-import { compactSDP } from "./qr-signaling";
+import { compactSDP, sanitizeSDP } from "./qr-signaling";
 
 export const DATA_CHANNEL_LABEL = "dhr-alert-relay";
 export const ICE_GATHERING_TIMEOUT_MS = 2000;
@@ -124,9 +124,10 @@ export async function initHostPeer(options?: {
 
   const applyAnswerSdp = async (answerSdp: string): Promise<void> => {
     options?.onStateChange?.("CONNECTING");
+    const sanitizedAnswer = sanitizeSDP(answerSdp);
     const desc = new RTCSessionDescription({
       type: "answer",
-      sdp: answerSdp,
+      sdp: sanitizedAnswer,
     });
     await pc.setRemoteDescription(desc);
   };
@@ -205,9 +206,10 @@ export async function initReceiverPeer(
 
   options?.onStateChange?.("GATHERING_ICE");
 
+  const sanitizedOffer = sanitizeSDP(offerSdp);
   const remoteDesc = new RTCSessionDescription({
     type: "offer",
-    sdp: offerSdp,
+    sdp: sanitizedOffer,
   });
   await pc.setRemoteDescription(remoteDesc);
 

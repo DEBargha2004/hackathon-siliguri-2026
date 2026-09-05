@@ -90,7 +90,15 @@ export class LlmAdvisoryCascade {
           env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
         }
 
-        onProgress?.(40, "LLM: Initializing WebGPU quantized instruct weights...");
+        onProgress?.(30, "LLM: Initializing WebGPU quantized instruct weights...");
+
+        let highestLlmProgress = 30;
+        const reportMonotonicProgress = (targetPercent: number, label: string) => {
+          if (targetPercent > highestLlmProgress) {
+            highestLlmProgress = targetPercent;
+          }
+          onProgress?.(highestLlmProgress, label);
+        };
 
         this.transformersPipeline = (await pipeline(
           "text-generation",
@@ -99,14 +107,41 @@ export class LlmAdvisoryCascade {
             dtype: "q4",
             device: "webgpu",
             progress_callback: (p: ProgressInfo) => {
-              if ("progress" in p && typeof p.progress === "number") {
-                onProgress?.(
-                  Math.min(92, Math.round(40 + p.progress * 0.52)),
-                  `LLM: Caching Qwen2.5 in IndexedDB (${Math.round(p.progress)}%)...`
+              const info = p as unknown as {
+                status?: string;
+                file?: string;
+                progress?: number;
+                loaded?: number;
+                total?: number;
+              };
+
+              if (typeof info.progress === "number") {
+                const file = info.file || "";
+                const isModelWeights =
+                  file.includes(".onnx") ||
+                  file.includes(".bin") ||
+                  file.includes("model");
+
+                let mappedProgress: number;
+                if (info.status === "progress_total") {
+                  // Total aggregate progress across all files
+                  mappedProgress = Math.min(95, Math.round(30 + info.progress * 0.65));
+                } else if (isModelWeights) {
+                  // Main weight file (~350 MB)
+                  mappedProgress = Math.min(95, Math.round(35 + info.progress * 0.60));
+                } else {
+                  // Small metadata/tokenizer files (<5 MB)
+                  mappedProgress = Math.min(35, Math.round(25 + info.progress * 0.10));
+                }
+
+                reportMonotonicProgress(
+                  mappedProgress,
+                  `LLM: Caching Qwen2.5 in IndexedDB (${Math.round(highestLlmProgress)}%)...`
                 );
               }
-              if ("status" in p && (p as unknown as { status: string }).status === "done") {
-                onProgress?.(95, "LLM: Compiling WebGPU instruct pipeline for device...");
+
+              if (info.status === "done") {
+                reportMonotonicProgress(95, "LLM: Compiling WebGPU instruct pipeline for device...");
               }
             },
           }
@@ -326,6 +361,7 @@ export class LlmAdvisoryCascade {
             ? "LLM Engine: Restoring Qwen2.5 from IndexedDB..."
             : "LLM Engine: Loading & caching Qwen2.5 in IndexedDB..."
         );
+        let highestInfProgress = 40;
         // Use an ultra-compact, quantized instruct model
         this.transformersPipeline = (await pipeline(
           "text-generation",
@@ -334,10 +370,29 @@ export class LlmAdvisoryCascade {
             dtype: "q4",
             device: "webgpu",
             progress_callback: (p: ProgressInfo) => {
-              if ("progress" in p && typeof p.progress === "number") {
+              const info = p as unknown as {
+                status?: string;
+                file?: string;
+                progress?: number;
+              };
+              if (typeof info.progress === "number") {
+                const file = info.file || "";
+                const isModelWeights =
+                  file.includes(".onnx") ||
+                  file.includes(".bin") ||
+                  file.includes("model");
+
+                let mapped = isModelWeights
+                  ? Math.min(95, Math.round(40 + info.progress * 0.55))
+                  : Math.min(45, Math.round(35 + info.progress * 0.10));
+
+                if (mapped > highestInfProgress) {
+                  highestInfProgress = mapped;
+                }
+
                 onProgress?.(
-                  Math.min(95, Math.round(40 + p.progress * 0.55)),
-                  `LLM Engine: Caching weights in IndexedDB (${Math.round(p.progress)}%)...`
+                  highestInfProgress,
+                  `LLM Engine: Caching weights in IndexedDB (${Math.round(highestInfProgress)}%)...`
                 );
               }
             },
