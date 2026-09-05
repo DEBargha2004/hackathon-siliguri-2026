@@ -1,13 +1,18 @@
 import React, { useCallback, useState } from "react";
 import { DHR_TEST_POINTS } from "@/lib/telemetry/sensors";
 import type { AdvisoryTier, Locale, TelemetryData } from "@/types/intelligence";
-import { SCENARIO_PRESETS, getFriendlyLocation, type ScenarioId } from "./config/scenario-config";
+import {
+  SCENARIO_PRESETS,
+  getFriendlyLocation,
+  type ScenarioId,
+} from "./config/scenario-config";
 import { loadPresetImage } from "./scenarios/scenario-loader";
 import { useHazardWorker } from "./hooks/use-hazard-worker";
 import { useHazardCamera } from "./hooks/use-hazard-camera";
 import { useSpeechAudio } from "./hooks/use-speech-audio";
 import { WizardStepper } from "./components/wizard-stepper";
 import { DiagnosticsDrawer } from "./components/diagnostics-drawer";
+import { DualModelLoader } from "./components/dual-model-loader";
 import { StepCapture } from "./steps/step-capture";
 import { StepConfirm } from "./steps/step-confirm";
 import { StepDirective } from "./steps/step-directive";
@@ -17,9 +22,11 @@ import { ReportQueueDrawer } from "@/components/queue/report-queue-drawer";
 
 export const HazardAnalyzerPanel: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
-  const [selectedLocale, setSelectedLocale] = useState<Locale>("ne");
+  const [selectedLocale, setSelectedLocale] = useState<Locale>("en");
   const [forcedTier, setForcedTier] = useState<AdvisoryTier | "auto">("auto");
-  const [telemetry, setTelemetry] = useState<TelemetryData>(DHR_TEST_POINTS.tindharia);
+  const [telemetry, setTelemetry] = useState<TelemetryData>(
+    DHR_TEST_POINTS.tindharia,
+  );
   const [copiedJson, setCopiedJson] = useState<boolean>(false);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(false);
   const [lastQueuedId, setLastQueuedId] = useState<string | null>(null);
@@ -41,6 +48,10 @@ export const HazardAnalyzerPanel: React.FC = () => {
     errorMessage,
     memoryHeapMB,
     analysisResult,
+    activeProcessingStage,
+    modelStatus,
+    cacheStats,
+    refreshCacheStats,
     dispatchAnalyze,
     clearError,
     setAnalysisResult,
@@ -89,7 +100,7 @@ export const HazardAnalyzerPanel: React.FC = () => {
         console.error("Failed to render scenario preset:", err);
       }
     },
-    [setPhotoFrame]
+    [setPhotoFrame],
   );
 
   // Trigger on-device inference explicitly from Step 2
@@ -112,7 +123,7 @@ export const HazardAnalyzerPanel: React.FC = () => {
       setSelectedLocale(locale);
       stopSpeech();
     },
-    [stopSpeech]
+    [stopSpeech],
   );
 
   // Tier override in diagnostics drawer
@@ -123,7 +134,7 @@ export const HazardAnalyzerPanel: React.FC = () => {
         dispatchAnalyze(capturedBitmap, telemetry, selectedLocale, tier);
       }
     },
-    [capturedBitmap, dispatchAnalyze, selectedLocale, telemetry]
+    [capturedBitmap, dispatchAnalyze, selectedLocale, telemetry],
   );
 
   // Copy canonical JSON report to clipboard
@@ -136,7 +147,7 @@ export const HazardAnalyzerPanel: React.FC = () => {
 
   const friendlyLandmark = getFriendlyLocation(
     activeScenarioId,
-    Boolean(telemetry.coordinates)
+    Boolean(telemetry.coordinates),
   );
 
   // Automatically persist report to IndexedDB queue upon hazard classification
@@ -149,7 +160,11 @@ export const HazardAnalyzerPanel: React.FC = () => {
       imageBitmapToBlob(capturedBitmap)
         .then((photoBlob) => {
           if (!isCancelled) {
-            return enqueue(analysisResult.context, analysisResult.advisory, photoBlob);
+            return enqueue(
+              analysisResult.context,
+              analysisResult.advisory,
+              photoBlob,
+            );
           }
         })
         .then((qId) => {
@@ -183,6 +198,16 @@ export const HazardAnalyzerPanel: React.FC = () => {
         queueSyncedCount={queueStats.syncedCount}
         isSyncingQueue={isQueueSyncing}
         onOpenQueue={() => setIsQueueDrawerOpen(true)}
+      />
+
+      {/* Dual Model Loader & IndexedDB Cache Status Card */}
+      <DualModelLoader
+        lifecycleState={lifecycleState}
+        loadingProgress={loadingProgress}
+        loadingStage={loadingStage}
+        modelStatus={modelStatus}
+        cacheStats={cacheStats}
+        activeProcessingStage={activeProcessingStage}
       />
 
       {/* Subsystem Error Banner */}
@@ -225,6 +250,9 @@ export const HazardAnalyzerPanel: React.FC = () => {
           previewImageUrl={previewImageUrl}
           friendlyLandmark={friendlyLandmark}
           isProcessing={lifecycleState === "PROCESSING"}
+          activeProcessingStage={activeProcessingStage}
+          loadingProgress={loadingProgress}
+          loadingStage={loadingStage}
           onRunAnalysis={handleRunAnalysis}
           onRetake={() => setCurrentStep(1)}
         />
@@ -254,6 +282,8 @@ export const HazardAnalyzerPanel: React.FC = () => {
           onSelectForcedTier={handleSelectForcedTier}
           memoryHeapMB={memoryHeapMB}
           analysisResult={analysisResult}
+          cacheStats={cacheStats}
+          onRefreshCache={refreshCacheStats}
           onCopyJson={handleCopyJson}
           copiedJson={copiedJson}
         />

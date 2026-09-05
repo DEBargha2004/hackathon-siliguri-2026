@@ -4,6 +4,7 @@ import { fuseHazardContext } from "../lib/context/fusion";
 import { LlmAdvisoryCascade } from "../lib/llm/cascade";
 import { VisionHazardClassifier } from "../lib/vision/classifier";
 import { deriveSeverity } from "../lib/vision/severity";
+import { isModelTypeCached } from "../lib/cache/model-cache-db";
 import type {
   AdvisoryTier,
   HazardAnalysisResult,
@@ -46,30 +47,43 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
       try {
         postLifecycle({
           type: "STATUS_LOADING_WEIGHTS",
-          progress: 10,
+          progress: 5,
           stage: "Mounting DHR on-device intelligence pipeline...",
+          modelType: "vision",
+          modelProgress: { vision: 5, llm: 0 },
         });
 
-        // 1. Initialize vision classifier with cache & delegate check
-        let isWorkerPipelineReady = false;
+        // 1. Initialize Vision Model with IndexedDB caching
         await visionClassifier.initialize((progress, stage) => {
-          if (isWorkerPipelineReady) return;
           postLifecycle({
             type: "STATUS_LOADING_WEIGHTS",
-            progress: Math.min(90, Math.round(10 + progress * 0.5)),
+            progress: Math.min(50, Math.round(progress * 0.5)),
             stage,
+            modelType: "vision",
+            modelProgress: { vision: progress, llm: 0 },
           });
         });
-        isWorkerPipelineReady = true;
 
-        // 2. Check LLM Tier capabilities
+        // 2. Initialize LLM Engine with IndexedDB caching
         postLifecycle({
           type: "STATUS_LOADING_WEIGHTS",
-          progress: 95,
-          stage: "Probing on-device AI delegates (Nano / WebGPU / Heuristic)...",
+          progress: 52,
+          stage: "Initializing on-device LLM engine...",
+          modelType: "llm",
+          modelProgress: { vision: 100, llm: 5 },
         });
 
-        // Determine default active tier
+        await llmCascade.initialize((progress, stage) => {
+          postLifecycle({
+            type: "STATUS_LOADING_WEIGHTS",
+            progress: Math.min(98, Math.round(50 + progress * 0.48)),
+            stage,
+            modelType: "llm",
+            modelProgress: { vision: 100, llm: progress },
+          });
+        });
+
+        // 3. Determine default active tier
         const aiScope =
           typeof self !== "undefined"
             ? (self as unknown as { ai?: { languageModel?: unknown } }).ai
@@ -86,11 +100,26 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
           activeTier = request.preferredTier;
         }
 
+        const isVisionCached = await isModelTypeCached("vision");
+        const isLlmCached = await isModelTypeCached("llm");
+
+        const tierName =
+          activeTier === 1
+            ? "Chrome Nano"
+            : activeTier === 2
+            ? "WebGPU Qwen2.5"
+            : "Deterministic Heuristic";
+
         postLifecycle({
           type: "STATUS_READY",
           activeTier,
           visionDelegate: visionClassifier.getDelegate(),
+          llmDelegate: tierName,
           memoryHeapMB: getHeapUsageMB(),
+          cachedInIndexedDb: {
+            vision: isVisionCached,
+            llm: isLlmCached,
+          },
         });
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : "Failed to initialize pipeline";
@@ -105,6 +134,7 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
           type: "STATUS_READY",
           activeTier: 3,
           visionDelegate: "fallback-analyzer",
+          llmDelegate: "Deterministic Heuristic Fallback",
           memoryHeapMB: getHeapUsageMB(),
         });
       }
@@ -138,7 +168,13 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
         }
 
         // 1. Vision stage
-        postLifecycle({ type: "STATUS_PROCESSING", stage: "vision", progress: 20 });
+        postLifecycle({
+          type: "STATUS_PROCESSING",
+          stage: "vision",
+          modelType: "vision",
+          stageDetail: "Vision Model: Classifying hazard features (MobileNetV4)...",
+          progress: 20,
+        });
         const visionStart = performance.now();
 
         const inputFrame = request.imageBitmap || request.imageData;
@@ -157,7 +193,13 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
         );
 
         // 3. Context fusion stage (telemetry + DHR landmark lookup)
-        postLifecycle({ type: "STATUS_PROCESSING", stage: "fusion", progress: 50 });
+        postLifecycle({
+          type: "STATUS_PROCESSING",
+          stage: "fusion",
+          modelType: "fusion",
+          stageDetail: "Context Fusion: Sensor telemetry & DHR landmark correlation...",
+          progress: 50,
+        });
         const fusionStart = performance.now();
 
         const fusedContext = fuseHazardContext(
@@ -169,18 +211,26 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequestMessage>) => {
         const fusionLatencyMs = Math.round(performance.now() - fusionStart);
 
         // 4. LLM Advisory Cascade stage (3-tier)
-        postLifecycle({ type: "STATUS_PROCESSING", stage: "advisory", progress: 75 });
+        postLifecycle({
+          type: "STATUS_PROCESSING",
+          stage: "advisory",
+          modelType: "llm",
+          stageDetail: "LLM Engine: Synthesizing multi-locale emergency advisories...",
+          progress: 75,
+        });
         const tierToUse = request.forcedTier ?? activeTier;
 
         const advisoryResult = await llmCascade.generateAdvisory(
           fusedContext,
           request.locale,
           tierToUse,
-          (progress) => {
+          (progress, stageText) => {
             postLifecycle({
               type: "STATUS_PROCESSING",
               stage: "advisory",
-              progress: Math.round(75 + progress * 0.2),
+              modelType: "llm",
+              stageDetail: stageText || "LLM Engine: Generating advisory...",
+              progress: Math.min(95, Math.round(75 + progress * 0.2)),
             });
           }
         );

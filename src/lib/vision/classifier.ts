@@ -4,6 +4,10 @@ import type {
   VisualIndicators,
 } from "../../types/intelligence";
 import type { ImageClassificationPipeline, ProgressInfo } from "@huggingface/transformers";
+import {
+  createTransformersCustomCache,
+  isModelTypeCached,
+} from "../cache/model-cache-db";
 
 export class VisionHazardClassifier {
   private visionPipeline: ImageClassificationPipeline | null = null;
@@ -12,18 +16,26 @@ export class VisionHazardClassifier {
 
   /**
    * Initializes the on-device neural vision classifier (MobileNetV4).
-   * Models are bundled locally and cached permanently in browser Cache Storage.
-   * Subsequent calls load directly from cache with zero network overhead.
+   * Models are bundled locally and cached permanently in IndexedDB.
+   * Subsequent calls load directly from IndexedDB with zero network overhead.
    */
   async initialize(onProgress?: (progress: number, stage: string) => void): Promise<void> {
     if (this.isInitialized) return;
 
-    onProgress?.(10, "Checking on-device neural vision cache...");
-
     try {
+      const isCachedInDb = await isModelTypeCached("vision");
+      if (isCachedInDb) {
+        onProgress?.(12, "Vision Model: Found weights in IndexedDB cache (fast restore)...");
+      } else {
+        onProgress?.(10, "Vision Model: Checking IndexedDB neural cache...");
+      }
+
       const { pipeline, env } = await import("@huggingface/transformers");
 
-      // Enable persistent browser Cache Storage for offline use and fast subsequent loads
+      // Enable persistent IndexedDB Cache Storage for offline use and fast subsequent loads
+      env.useCustomCache = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      env.customCache = createTransformersCustomCache("vision") as any;
       env.useBrowserCache = true;
       env.useWasmCache = true;
       env.allowLocalModels = false;
@@ -32,7 +44,7 @@ export class VisionHazardClassifier {
         env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
       }
 
-      onProgress?.(20, "Loading neural vision classifier (MobileNetV4)...");
+      onProgress?.(22, "Vision Model: Loading neural vision classifier (MobileNetV4)...");
 
       const loadPipeline = async (device: "webgpu" | "wasm") => {
         return (await pipeline(
@@ -44,12 +56,12 @@ export class VisionHazardClassifier {
               if (this.isInitialized) return;
               if ("progress" in p && typeof p.progress === "number") {
                 onProgress?.(
-                  Math.round(20 + p.progress * 0.40),
-                  `Caching vision model weights...`
+                  Math.min(90, Math.round(25 + p.progress * 0.55)),
+                  `Vision Model: Caching weights in IndexedDB (${Math.round(p.progress)}%)...`
                 );
               }
               if ("status" in p && (p as unknown as { status: string }).status === "done") {
-                onProgress?.(62, "Compiling vision model for device...");
+                onProgress?.(85, "Vision Model: Compiling neural vision graph for device...");
               }
             },
           }
@@ -115,7 +127,11 @@ export class VisionHazardClassifier {
     }
 
     this.isInitialized = true;
-    onProgress?.(100, `Neural vision ready (${this.delegateUsed})`);
+    const isCachedNow = await isModelTypeCached("vision");
+    onProgress?.(
+      100,
+      `Neural vision ready (${this.delegateUsed})${isCachedNow ? " • Cached in IndexedDB" : ""}`
+    );
   }
 
   getDelegate(): "webgpu" | "wasm" | "webgl" | "cpu" | "fallback-analyzer" {

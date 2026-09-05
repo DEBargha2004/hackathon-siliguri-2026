@@ -99,17 +99,25 @@ export type WorkerLifecycleMessage =
       progress: number; // 0 to 100
       stage: string;
       tierAttempted?: AdvisoryTier;
+      modelType?: "vision" | "llm";
+      modelProgress?: { vision?: number; llm?: number };
+      detail?: string;
+      cachedInIndexedDb?: { vision?: boolean; llm?: boolean };
     }
   | {
       type: "STATUS_READY";
       activeTier: AdvisoryTier;
       visionDelegate: "webgpu" | "wasm" | "webgl" | "cpu" | "fallback-analyzer";
+      llmDelegate?: string;
       memoryHeapMB?: number;
+      cachedInIndexedDb?: { vision?: boolean; llm?: boolean };
     }
   | {
       type: "STATUS_PROCESSING";
       stage: "vision" | "fusion" | "advisory";
       progress?: number;
+      stageDetail?: string;
+      modelType?: "vision" | "llm" | "fusion";
     }
   | {
       type: "STATUS_ERROR";

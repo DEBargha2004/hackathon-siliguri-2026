@@ -15,6 +15,10 @@ export interface CascadeExecutionResult {
 }
 
 import type { TextGenerationPipeline, ProgressInfo } from "@huggingface/transformers";
+import {
+  createTransformersCustomCache,
+  isModelTypeCached,
+} from "../cache/model-cache-db";
 
 interface ChromeAiSession {
   prompt(text: string): Promise<string>;
@@ -31,6 +35,101 @@ interface ChromeAiScope {
 export class LlmAdvisoryCascade {
   private transformersPipeline: TextGenerationPipeline | null = null;
   private memoryGuardrailTripped = false;
+  private isInitializing = false;
+
+  /**
+   * Initializes and warms up the on-device LLM engine.
+   * Checks Chrome Built-in AI or caches quantized WebGPU Qwen2.5-0.5B in IndexedDB.
+   */
+  async initialize(onProgress?: (progress: number, stage: string) => void): Promise<void> {
+    if (this.transformersPipeline) {
+      onProgress?.(100, "LLM Engine ready (cached in memory & IndexedDB)");
+      return;
+    }
+    if (this.isInitializing) return;
+    this.isInitializing = true;
+
+    try {
+      // 1. Check Chrome Built-in AI
+      onProgress?.(10, "LLM: Probing Chrome Built-in AI (Gemini Nano)...");
+      const globalObj = typeof self !== "undefined" ? self : globalThis;
+      const aiScope = (globalObj as unknown as { ai?: ChromeAiScope }).ai;
+      if (aiScope?.languageModel) {
+        try {
+          const cap = await aiScope.languageModel.capabilities();
+          if (cap.available === "readily" || cap.available === "after-download") {
+            onProgress?.(100, "LLM Engine ready (Chrome Built-in AI Gemini Nano)");
+            this.isInitializing = false;
+            return;
+          }
+        } catch {
+          // Fall through to WebGPU
+        }
+      }
+
+      // 2. Check WebGPU for in-browser Qwen2.5-0.5B
+      const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
+      if (hasWebGPU) {
+        const isCachedInDb = await isModelTypeCached("llm");
+        if (isCachedInDb) {
+          onProgress?.(25, "LLM: Found Qwen2.5 weights in IndexedDB cache (fast restore)...");
+        } else {
+          onProgress?.(20, "LLM: Checking IndexedDB neural cache for Qwen2.5-0.5B...");
+        }
+
+        const { pipeline, env } = await import("@huggingface/transformers");
+
+        // Enable IndexedDB model caching
+        env.useCustomCache = true;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        env.customCache = createTransformersCustomCache("llm") as any;
+        env.useBrowserCache = true;
+        env.allowLocalModels = false;
+        env.allowRemoteModels = true;
+        if (env.backends?.onnx?.wasm) {
+          env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/";
+        }
+
+        onProgress?.(40, "LLM: Initializing WebGPU quantized instruct weights...");
+
+        this.transformersPipeline = (await pipeline(
+          "text-generation",
+          "onnx-community/Qwen2.5-0.5B-Instruct",
+          {
+            dtype: "q4",
+            device: "webgpu",
+            progress_callback: (p: ProgressInfo) => {
+              if ("progress" in p && typeof p.progress === "number") {
+                onProgress?.(
+                  Math.min(92, Math.round(40 + p.progress * 0.52)),
+                  `LLM: Caching Qwen2.5 in IndexedDB (${Math.round(p.progress)}%)...`
+                );
+              }
+              if ("status" in p && (p as unknown as { status: string }).status === "done") {
+                onProgress?.(95, "LLM: Compiling WebGPU instruct pipeline for device...");
+              }
+            },
+          }
+        )) as unknown as TextGenerationPipeline;
+
+        const isNowCached = await isModelTypeCached("llm");
+        onProgress?.(
+          100,
+          `LLM Engine ready (WebGPU Qwen2.5)${isNowCached ? " • Cached in IndexedDB" : ""}`
+        );
+        this.isInitializing = false;
+        return;
+      }
+
+      // 3. Deterministic Heuristic Fallback
+      onProgress?.(100, "LLM Engine ready (Deterministic Heuristic <10ms)");
+    } catch (err) {
+      console.warn("[LlmCascade] Initialize fallback to Tier 3:", err);
+      onProgress?.(100, "LLM Engine ready (Deterministic Heuristic Fallback)");
+    } finally {
+      this.isInitializing = false;
+    }
+  }
 
   /**
    * Checks allocated JS heap to ensure memory stays strictly below 1.2 GB.
@@ -208,7 +307,10 @@ export class LlmAdvisoryCascade {
     try {
       const { pipeline, env } = await import("@huggingface/transformers");
 
-      // Configure Transformers.js offline caching & WebGPU backend
+      // Configure Transformers.js IndexedDB caching & WebGPU backend
+      env.useCustomCache = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      env.customCache = createTransformersCustomCache("llm") as any;
       env.useBrowserCache = true;
       env.allowLocalModels = false;
       env.allowRemoteModels = true;
@@ -217,7 +319,13 @@ export class LlmAdvisoryCascade {
       }
 
       if (!this.transformersPipeline) {
-        onProgress?.(40, "Compiling WebGPU quantized instruct weights...");
+        const isCached = await isModelTypeCached("llm");
+        onProgress?.(
+          40,
+          isCached
+            ? "LLM Engine: Restoring Qwen2.5 from IndexedDB..."
+            : "LLM Engine: Loading & caching Qwen2.5 in IndexedDB..."
+        );
         // Use an ultra-compact, quantized instruct model
         this.transformersPipeline = (await pipeline(
           "text-generation",
@@ -227,7 +335,10 @@ export class LlmAdvisoryCascade {
             device: "webgpu",
             progress_callback: (p: ProgressInfo) => {
               if ("progress" in p && typeof p.progress === "number") {
-                onProgress?.(Math.round(40 + p.progress * 0.4), "Downloading model weights...");
+                onProgress?.(
+                  Math.min(95, Math.round(40 + p.progress * 0.55)),
+                  `LLM Engine: Caching weights in IndexedDB (${Math.round(p.progress)}%)...`
+                );
               }
             },
           }

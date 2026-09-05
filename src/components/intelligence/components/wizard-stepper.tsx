@@ -24,6 +24,7 @@ export const WizardStepper: React.FC<WizardStepperProps> = ({
   canAccessStep3,
   lifecycleState,
   loadingProgress,
+  loadingStage,
   queuePendingCount = 0,
   queueFailedCount = 0,
   queueSyncedCount = 0,
@@ -124,10 +125,21 @@ export const WizardStepper: React.FC<WizardStepperProps> = ({
         {lifecycleState === "LOADING" && (
           <span
             className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20"
-            title="Initializing on-device AI pipeline"
+            title={loadingStage || "Initializing on-device AI pipeline & IndexedDB cache"}
           >
             <span className="h-2 w-2 rounded-full border-[1.5px] border-primary border-r-transparent animate-spin" />
             AI {loadingProgress ? Math.min(100, Math.max(0, Math.round(loadingProgress))) : 0}%
+          </span>
+        )}
+
+        {/* AI Engine Processing Pill */}
+        {lifecycleState === "PROCESSING" && (
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20"
+            title={loadingStage || "Dual AI inference active"}
+          >
+            <span className="h-2 w-2 rounded-full border-[1.5px] border-amber-500 border-r-transparent animate-spin" />
+            Inferring
           </span>
         )}
 

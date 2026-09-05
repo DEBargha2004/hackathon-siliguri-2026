@@ -198,21 +198,23 @@ export const StepCapture: React.FC<StepCaptureProps> = ({
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 <Button
                   size="sm"
-                  onClick={() => nativeCameraInputRef.current?.click()}
+                  onClick={onStartCamera}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full text-xs shadow-md gap-1.5"
                 >
-                  <Smartphone className="h-3.5 w-3.5" />
-                  Take Photo
+                  <Camera className="h-3.5 w-3.5" />
+                  Live Camera
                 </Button>
+
                 <Button
                   size="sm"
-                  variant="secondary"
-                  onClick={onStartCamera}
+                  variant="outline"
+                  onClick={() => nativeCameraInputRef.current?.click()}
                   className="rounded-full text-xs font-semibold shadow-sm gap-1.5"
                 >
-                  <Camera className="h-3.5 w-3.5" />
-                  Live Viewfinder
+                  <Smartphone className="h-3.5 w-3.5" />
+                  Native Camera
                 </Button>
+
                 <Button
                   size="sm"
                   variant="outline"
@@ -243,7 +245,10 @@ export const StepCapture: React.FC<StepCaptureProps> = ({
         )}
 
         {/* Preset Presets Grid */}
-        <ScenarioPresetGrid selectedId={activeScenarioId} onSelect={onSelectPreset} />
+        <ScenarioPresetGrid
+          selectedId={activeScenarioId}
+          onSelect={onSelectPreset}
+        />
       </div>
 
       {/* Advance to Step 2 */}
