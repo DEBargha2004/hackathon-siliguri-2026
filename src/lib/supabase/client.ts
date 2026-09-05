@@ -3,16 +3,19 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const LOCAL_STORAGE_URL_KEY = "dhr_supabase_url";
 const LOCAL_STORAGE_KEY_KEY = "dhr_supabase_anon_key";
 
+const DEFAULT_SUPABASE_URL = "https://vixlxbkvelkdgmebajqc.supabase.co";
+const DEFAULT_SUPABASE_KEY = "sb_publishable_D1u71FpOd15Jf_5b3JI4oA_tqSoOarv";
+
 export function getSupabaseCredentials(): { url: string; anonKey: string } {
   const envUrl =
-    typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL
-      ? (import.meta.env.VITE_SUPABASE_URL as string).trim()
-      : "";
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL) ||
+    (typeof process !== "undefined" && process.env?.VITE_SUPABASE_URL) ||
+    DEFAULT_SUPABASE_URL;
 
   const envKey =
-    typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY
-      ? (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string).trim()
-      : "";
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+    (typeof process !== "undefined" && process.env?.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+    DEFAULT_SUPABASE_KEY;
 
   let storedUrl = "";
   let storedKey = "";
@@ -22,8 +25,8 @@ export function getSupabaseCredentials(): { url: string; anonKey: string } {
   }
 
   return {
-    url: storedUrl || envUrl,
-    anonKey: storedKey || envKey,
+    url: (storedUrl || envUrl || DEFAULT_SUPABASE_URL).trim(),
+    anonKey: (storedKey || envKey || DEFAULT_SUPABASE_KEY).trim(),
   };
 }
 

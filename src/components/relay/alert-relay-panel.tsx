@@ -86,14 +86,16 @@ export const AlertRelayPanel: React.FC<AlertRelayPanelProps> = ({
     setIsSyncing(true);
     setSyncStatusMsg(null);
     try {
-      const res = await syncOfficialAlerts();
+      const res = await syncOfficialAlerts({ forceSync: true });
       if (res.error) {
         setSyncStatusMsg(`Sync note: ${res.error}`);
       } else {
         setSyncStatusMsg(
           res.ingestedCount > 0
-            ? `Received ${res.ingestedCount} new corridor alert(s)`
-            : "Corridor alerts are up to date."
+            ? `Synced ${res.ingestedCount} corridor alert(s) from cloud.`
+            : res.totalFound > 0
+            ? `All ${res.totalFound} cloud alerts are up to date.`
+            : "No cloud alerts found."
         );
       }
       await reloadAlerts();

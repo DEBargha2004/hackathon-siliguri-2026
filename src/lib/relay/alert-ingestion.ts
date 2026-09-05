@@ -1,25 +1,56 @@
 import { getSupabase } from "@/lib/supabase/client";
 import type { OfficialAlert, HazardType, AlertSeverity } from "@/types/alert";
-import { isAlertSeen, saveOfficialAlert } from "./alert-store";
+import { getOfficialAlertById, saveOfficialAlert, unmarkAlertDismissed } from "./alert-store";
 
 export interface SupabaseAlertRow {
   id: string;
   created_at: string;
-  hazard_type: string;
-  severity: string;
-  message: string;
+  hazard_type?: string;
+  severity?: string;
+  message?: string;
+  landmark_label?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   photo_url?: string | null;
   hop_count?: number | null;
+  advisory?: {
+    hazardLabel?: string;
+    immediateAction?: string;
+    relayPriority?: string;
+  } | null;
+  context?: {
+    hazardType?: string;
+    severity?: string;
+    visionConfidence?: number;
+    proximityLandmark?: { label?: string };
+    telemetry?: {
+      coordinates?: [number, number];
+      elevationMeters?: number;
+    };
+  } | null;
+}
+
+/**
+ * Creates a valid emergency placeholder SVG Blob when an image cannot be fetched over poor cellular connectivity.
+ */
+function createEmergencyPlaceholderBlob(title = "Hazard Advisory"): Blob {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+    <rect width="600" height="400" fill="#18181b"/>
+    <rect x="20" y="20" width="560" height="360" rx="12" fill="#27272a" stroke="#ef4444" stroke-width="2"/>
+    <circle cx="300" cy="160" r="50" fill="#7f1d1d" fill-opacity="0.5"/>
+    <path d="M300 130 L325 180 L275 180 Z" fill="#f87171"/>
+    <text x="300" y="250" font-family="system-ui, sans-serif" font-size="20" font-weight="bold" fill="#f43f5e" text-anchor="middle">EMERGENCY CORRIDOR REPORT</text>
+    <text x="300" y="280" font-family="system-ui, sans-serif" font-size="14" fill="#a1a1aa" text-anchor="middle">${title}</text>
+  </svg>`;
+  return new Blob([svg], { type: "image/svg+xml" });
 }
 
 /**
  * Downloads an evidence photo from Supabase Storage or public URL into a local Blob.
+ * Protected with timeout to prevent hanging.
  */
-export async function downloadPhotoBlob(photoUrl: string): Promise<Blob> {
+export async function downloadPhotoBlob(photoUrl: string, timeoutMs = 6000): Promise<Blob> {
   const supabase = getSupabase();
-
   let targetUrl = photoUrl;
 
   // Check if photoUrl is a relative Supabase storage path like "hazard-photos/my-photo.jpg"
@@ -31,15 +62,25 @@ export async function downloadPhotoBlob(photoUrl: string): Promise<Blob> {
     }
   }
 
-  const response = await fetch(targetUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch alert photo from ${targetUrl} (HTTP ${response.status})`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(targetUrl, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch alert photo from ${targetUrl} (HTTP ${response.status})`);
+    }
+    return await response.blob();
+  } catch (err) {
+    clearTimeout(timer);
+    console.warn(`[AlertIngestion] Could not download photo from ${targetUrl}:`, err);
+    return createEmergencyPlaceholderBlob("Evidence Photo");
   }
-  return response.blob();
 }
 
 /**
- * Maps a raw Supabase database row to canonical OfficialAlert with downloaded photoBlob.
+ * Maps a raw Supabase database row (from hazard_reports or official_alerts) to canonical OfficialAlert.
  */
 export async function mapRowToOfficialAlert(row: SupabaseAlertRow): Promise<OfficialAlert> {
   let photoBlob: Blob;
@@ -47,39 +88,50 @@ export async function mapRowToOfficialAlert(row: SupabaseAlertRow): Promise<Offi
   if (row.photo_url) {
     try {
       photoBlob = await downloadPhotoBlob(row.photo_url);
-    } catch (err) {
-      console.warn(`[AlertIngestion] Failed to download photo for alert ${row.id}:`, err);
-      // Fallback 1x1 placeholder blob
-      photoBlob = new Blob(["offline-placeholder-photo"], { type: "image/jpeg" });
+    } catch {
+      photoBlob = createEmergencyPlaceholderBlob(row.advisory?.hazardLabel || "Evidence Photo");
     }
   } else {
-    photoBlob = new Blob(["offline-placeholder-photo"], { type: "image/jpeg" });
+    photoBlob = createEmergencyPlaceholderBlob(row.advisory?.hazardLabel || "Evidence Photo");
   }
 
-  const hazardType = (
-    ["LANDSLIDE_SLIP", "TRACK_ROAD_BLOCKAGE", "WATER_SEEPAGE"].includes(row.hazard_type)
-      ? row.hazard_type
-      : "LANDSLIDE_SLIP"
-  ) as HazardType;
+  const rawHazard = (row.hazard_type || row.context?.hazardType || "").toUpperCase();
+  const hazardType: HazardType =
+    rawHazard.includes("TRACK") || rawHazard.includes("BLOCK")
+      ? "TRACK_ROAD_BLOCKAGE"
+      : rawHazard.includes("WATER") || rawHazard.includes("SEEP") || rawHazard.includes("CULVERT")
+      ? "WATER_SEEPAGE"
+      : "LANDSLIDE_SLIP";
 
-  const severity = (
-    ["CRITICAL", "WARNING", "MONITOR"].includes(row.severity)
-      ? row.severity
-      : "WARNING"
-  ) as AlertSeverity;
+  const rawSeverity = (row.severity || row.context?.severity || "").toUpperCase();
+  const severity: AlertSeverity =
+    rawSeverity.includes("CRIT") || rawSeverity.includes("HIGH")
+      ? "CRITICAL"
+      : rawSeverity.includes("WARN") || rawSeverity.includes("MED")
+      ? "WARNING"
+      : "MONITOR";
 
   const coordinates: [number, number] | undefined =
     row.latitude != null && row.longitude != null
       ? [row.latitude, row.longitude]
-      : undefined;
+      : row.context?.telemetry?.coordinates;
 
   const issuedAt = row.created_at ? new Date(row.created_at).getTime() : Date.now();
+
+  let message = row.message;
+  if (!message) {
+    const parts: string[] = [];
+    if (row.advisory?.hazardLabel) parts.push(row.advisory.hazardLabel);
+    if (row.landmark_label) parts.push(`📍 ${row.landmark_label}`);
+    if (row.advisory?.immediateAction) parts.push(`Action: ${row.advisory.immediateAction}`);
+    message = parts.join(" • ") || "Official Corridor Advisory";
+  }
 
   return {
     id: row.id,
     hazardType,
     severity,
-    message: row.message || "Official Corridor Advisory",
+    message,
     coordinates,
     issuedAt,
     photoBlob,
@@ -89,10 +141,11 @@ export async function mapRowToOfficialAlert(row: SupabaseAlertRow): Promise<Offi
 
 /**
  * Ingest new official alerts from Supabase.
- * Fetches records from 'official_alerts' table that have not been cached yet.
- * Returns the count of newly ingested alerts.
+ * Checks both 'hazard_reports' (live synced field reports) and 'official_alerts'.
  */
-export async function syncOfficialAlerts(): Promise<{
+export async function syncOfficialAlerts(options?: {
+  forceSync?: boolean;
+}): Promise<{
   ingestedCount: number;
   totalFound: number;
   error?: string;
@@ -102,39 +155,72 @@ export async function syncOfficialAlerts(): Promise<{
     return {
       ingestedCount: 0,
       totalFound: 0,
-      error: "Supabase client not configured or offline",
+      error: "Supabase credentials not configured or network offline",
     };
   }
 
   try {
-    const { data: rows, error } = await supabase
-      .from("official_alerts")
+    // 1. Fetch from 'hazard_reports' (primary active table where emergency reports are synced)
+    const { data: hazardRows, error: hazardError } = await supabase
+      .from("hazard_reports")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(25);
 
-    if (error) {
-      // If table doesn't exist yet, return clean diagnostic
+    const rows: SupabaseAlertRow[] = [];
+
+    if (!hazardError && hazardRows) {
+      rows.push(...(hazardRows as unknown as SupabaseAlertRow[]));
+    }
+
+    // 2. Also query 'official_alerts' table if present in schema
+    try {
+      const { data: officialRows, error: officialError } = await supabase
+        .from("official_alerts")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (!officialError && officialRows) {
+        const existingIds = new Set(rows.map((r) => r.id));
+        for (const row of officialRows as SupabaseAlertRow[]) {
+          if (!existingIds.has(row.id)) {
+            rows.push(row);
+          }
+        }
+      }
+    } catch {
+      // official_alerts table may not exist; safe to ignore
+    }
+
+    if (hazardError && rows.length === 0) {
       return {
         ingestedCount: 0,
         totalFound: 0,
-        error: error.message,
+        error: hazardError.message,
       };
     }
 
-    if (!rows || rows.length === 0) {
+    if (rows.length === 0) {
       return { ingestedCount: 0, totalFound: 0 };
     }
 
     let ingestedCount = 0;
-    for (const row of rows as SupabaseAlertRow[]) {
-      const alreadySeen = await isAlertSeen(row.id);
-      if (alreadySeen) {
+    for (const row of rows) {
+      // On manual user sync, unmark dismissal so user sees fresh cloud alerts
+      if (options?.forceSync) {
+        unmarkAlertDismissed(row.id);
+        unmarkAlertDismissed(`dhr-report-${row.id}`);
+      }
+
+      // Check if already in IndexedDB
+      const existing = await getOfficialAlertById(row.id);
+      if (existing && !options?.forceSync) {
         continue;
       }
 
       const alert = await mapRowToOfficialAlert(row);
-      const res = await saveOfficialAlert(alert);
+      const res = await saveOfficialAlert(alert, { forceUpdate: true });
       if (res.success) {
         ingestedCount++;
       }
@@ -168,7 +254,29 @@ export function subscribeToOfficialAlerts(
   }
 
   const channel = supabase
-    .channel("official_alerts_realtime")
+    .channel("corridor_hazard_reports_realtime")
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "hazard_reports",
+      },
+      async (payload) => {
+        const row = payload.new as unknown as SupabaseAlertRow;
+        if (!row?.id) return;
+
+        try {
+          const alert = await mapRowToOfficialAlert(row);
+          const res = await saveOfficialAlert(alert, { forceUpdate: true });
+          if (res.success && onNewAlert) {
+            onNewAlert(alert);
+          }
+        } catch (err) {
+          console.error("[AlertIngestion] Failed to ingest realtime hazard report:", err);
+        }
+      }
+    )
     .on(
       "postgres_changes",
       {
@@ -180,17 +288,14 @@ export function subscribeToOfficialAlerts(
         const row = payload.new as SupabaseAlertRow;
         if (!row?.id) return;
 
-        const alreadySeen = await isAlertSeen(row.id);
-        if (alreadySeen) return;
-
         try {
           const alert = await mapRowToOfficialAlert(row);
-          const res = await saveOfficialAlert(alert);
+          const res = await saveOfficialAlert(alert, { forceUpdate: true });
           if (res.success && onNewAlert) {
             onNewAlert(alert);
           }
         } catch (err) {
-          console.error("[AlertIngestion] Failed to ingest realtime alert:", err);
+          console.error("[AlertIngestion] Failed to ingest realtime official alert:", err);
         }
       }
     )
