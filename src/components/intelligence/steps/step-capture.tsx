@@ -38,7 +38,7 @@ export const StepCapture: React.FC<StepCaptureProps> = ({
   capturedBitmap,
   activeScenarioId,
   cameraError,
-  onStartCamera,
+  // onStartCamera,
   onStopCamera,
   onToggleCameraFacing,
   onCaptureCamera,
