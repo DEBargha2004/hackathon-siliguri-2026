@@ -198,15 +198,6 @@ export const StepCapture: React.FC<StepCaptureProps> = ({
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 <Button
                   size="sm"
-                  onClick={onStartCamera}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full text-xs shadow-md gap-1.5"
-                >
-                  <Camera className="h-3.5 w-3.5" />
-                  Live Camera
-                </Button>
-
-                <Button
-                  size="sm"
                   variant="outline"
                   onClick={() => nativeCameraInputRef.current?.click()}
                   className="rounded-full text-xs font-semibold shadow-sm gap-1.5"
