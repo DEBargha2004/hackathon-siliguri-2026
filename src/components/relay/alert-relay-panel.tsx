@@ -21,6 +21,7 @@ import {
   canRelayAlert,
   MAX_HOP_COUNT,
   importReportsFromLocalQueue,
+  clearAllOfficialAlerts,
 } from "@/lib/relay/alert-store";
 import {
   syncOfficialAlerts,
@@ -122,9 +123,7 @@ export const AlertRelayPanel: React.FC<AlertRelayPanelProps> = ({
 
   // Clear all cached alerts
   const handleClearAll = async () => {
-    for (const a of alerts) {
-      await deleteOfficialAlert(a.id);
-    }
+    await clearAllOfficialAlerts();
     await reloadAlerts();
   };
 

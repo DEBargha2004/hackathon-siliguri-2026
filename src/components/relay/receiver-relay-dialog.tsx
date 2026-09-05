@@ -8,6 +8,10 @@ import {
   Copy,
   Inbox,
   ShieldCheck,
+  ChevronLeft,
+  ChevronRight,
+  Pause,
+  Play,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { OfficialAlert, TransferProgress } from "@/types/alert";
@@ -92,7 +96,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
     if (qrDataUrls.length > 1 && !isAnimationPaused && step === 2) {
       animationTimerRef.current = setInterval(() => {
         setCurrentFrameIndex((prev) => (prev + 1) % qrDataUrls.length);
-      }, 280);
+      }, 420);
     }
 
     return () => {
@@ -126,7 +130,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
       const frames = prepareQRFrames(receiverSession.answerSdp);
       const renderedUrls: string[] = [];
       for (const frame of frames) {
-        const url = await renderQRCodeDataUrl(frame, { width: 300, margin: 2 });
+        const url = await renderQRCodeDataUrl(frame, { width: 360, margin: 4 });
         renderedUrls.push(url);
       }
 
@@ -242,7 +246,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
               </div>
 
               {/* QR Display Frame */}
-              <div className="relative mx-auto w-64 h-64 rounded-2xl border-2 border-border bg-white p-3 shadow-inner flex flex-col items-center justify-center">
+              <div className="relative mx-auto w-72 h-72 sm:w-80 sm:h-80 rounded-2xl border-2 border-border bg-white p-3 shadow-inner flex flex-col items-center justify-center">
                 {qrDataUrls.length > 0 ? (
                   <img
                     src={qrDataUrls[currentFrameIndex]}
@@ -260,7 +264,7 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
 
                 {/* Animated frame badge if multi-frame */}
                 {qrDataUrls.length > 1 && (
-                  <div className="absolute bottom-2 rounded-full bg-black/80 px-2 py-0.5 text-[9px] font-mono text-white flex items-center gap-1.5">
+                  <div className="absolute bottom-2 rounded-full bg-black/85 px-3 py-0.5 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-md">
                     <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />
                     Frame {currentFrameIndex + 1} of {qrDataUrls.length}
                   </div>
@@ -273,22 +277,44 @@ export const ReceiverRelayDialog: React.FC<ReceiverRelayDialogProps> = ({
                   <Button
                     size="xs"
                     variant="outline"
-                    onClick={() => setIsAnimationPaused(!isAnimationPaused)}
-                    className="text-[10px] h-6 rounded-md"
+                    onClick={() =>
+                      setCurrentFrameIndex(
+                        (prev) => (prev - 1 + qrDataUrls.length) % qrDataUrls.length
+                      )
+                    }
+                    className="text-[10px] h-7 rounded-lg gap-1 px-2"
                   >
-                    {isAnimationPaused ? "Resume Animation" : "Pause Animation"}
+                    <ChevronLeft className="h-3 w-3" />
+                    Prev
                   </Button>
                   <Button
                     size="xs"
-                    variant="ghost"
+                    variant="outline"
+                    onClick={() => setIsAnimationPaused(!isAnimationPaused)}
+                    className="text-[10px] h-7 rounded-lg gap-1 px-2.5 font-semibold"
+                  >
+                    {isAnimationPaused ? (
+                      <>
+                        <Play className="h-3 w-3 text-blue-600" /> Resume Cycle
+                      </>
+                    ) : (
+                      <>
+                        <Pause className="h-3 w-3 text-amber-600" /> Pause Frame
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
                     onClick={() =>
                       setCurrentFrameIndex(
                         (prev) => (prev + 1) % qrDataUrls.length
                       )
                     }
-                    className="text-[10px] h-6 rounded-md"
+                    className="text-[10px] h-7 rounded-lg gap-1 px-2"
                   >
-                    Next Frame
+                    Next
+                    <ChevronRight className="h-3 w-3" />
                   </Button>
                 </div>
               )}

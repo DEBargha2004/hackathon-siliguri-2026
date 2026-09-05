@@ -2,18 +2,27 @@ import QRCode from "qrcode";
 import type { QRChunkData } from "@/types/alert";
 
 export const MAX_SINGLE_QR_CHARS = 850;
-export const QR_CHUNK_PAYLOAD_SIZE = 600;
+export const QR_CHUNK_PAYLOAD_SIZE = 450;
 export const QR_CHUNK_PREFIX = "DHR:Q";
 
 /**
- * Compact SDP string to remove unnecessary blank lines and whitespace
- * while strictly preserving all host candidate and SCTP setup lines.
+ * Compact SDP string to remove unnecessary blank lines and non-critical headers
+ * while strictly preserving all host candidates and SCTP setup lines.
  */
 export function compactSDP(sdp: string): string {
   return sdp
-    .split("\r\n")
+    .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("a=extmap:"))
+    .filter((line) => {
+      if (!line) return false;
+      if (line.startsWith("a=extmap:")) return false;
+      if (line.startsWith("a=extmap-allow-mixed")) return false;
+      if (line.startsWith("a=msid-semantic:")) return false;
+      if (line.startsWith("a=rtcp:")) return false;
+      if (line.startsWith("a=rtcp-mux")) return false;
+      if (line.startsWith("a=rtcp-rsize")) return false;
+      return true;
+    })
     .join("\r\n");
 }
 
@@ -42,15 +51,16 @@ export function prepareQRFrames(payload: string): string[] {
 
 /**
  * Generates an SVG or PNG data URL for a given text string using `qrcode`.
+ * Uses 'L' error correction (larger, crisper blocks) and 4-module quiet zone margin.
  */
 export async function renderQRCodeDataUrl(
   text: string,
   options?: { margin?: number; width?: number }
 ): Promise<string> {
   return QRCode.toDataURL(text, {
-    errorCorrectionLevel: "M",
-    margin: options?.margin ?? 2,
-    width: options?.width ?? 320,
+    errorCorrectionLevel: "L", // Low error correction = larger blocks, easier camera focus
+    margin: options?.margin ?? 4, // 4-module white quiet zone prevents edge detection failure
+    width: options?.width ?? 380, // Crisp resolution for optical scanning
     color: {
       dark: "#000000",
       light: "#ffffff",

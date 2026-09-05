@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import jsQR from "jsqr";
-import { Camera, FlipHorizontal, X, Keyboard, CheckCircle2 } from "lucide-react";
+import { Camera, FlipHorizontal, X, Keyboard, CheckCircle2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRChunkCollector } from "@/lib/relay/qr-signaling";
+
+// Polyfill type for native BarcodeDetector if not standard in DOM lib
+interface NativeBarcodeDetector {
+  detect(image: ImageBitmapSource): Promise<Array<{ rawValue: string }>>;
+}
 
 export interface QRScannerViewProps {
   title?: string;
@@ -28,6 +33,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const [isDetectedFlash, setIsDetectedFlash] = useState<boolean>(false);
   const [isManualInputOpen, setIsManualInputOpen] = useState<boolean>(false);
   const [manualText, setManualText] = useState<string>("");
+  const [isEngineNative, setIsEngineNative] = useState<boolean>(false);
 
   // Cleanly stop camera
   const stopStream = useCallback(() => {
@@ -45,6 +51,21 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   useEffect(() => {
     let isCancelled = false;
     collectorRef.current.reset();
+
+    // Check for native BarcodeDetector support
+    let barcodeDetector: NativeBarcodeDetector | null = null;
+    if (typeof window !== "undefined" && "BarcodeDetector" in window) {
+      try {
+        const DetectorClass = (window as unknown as { BarcodeDetector: new (opts?: { formats: string[] }) => NativeBarcodeDetector }).BarcodeDetector;
+        barcodeDetector = new DetectorClass({ formats: ["qr_code"] });
+        setIsEngineNative(true);
+      } catch {
+        barcodeDetector = null;
+        setIsEngineNative(false);
+      }
+    } else {
+      setIsEngineNative(false);
+    }
 
     const startCamera = async () => {
       setCameraError(null);
@@ -80,6 +101,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute("playsinline", "true");
           await videoRef.current.play().catch(() => {});
         }
 
@@ -96,46 +118,105 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let isProcessing = false;
 
-    const scanFrame = () => {
-      if (isCancelled || !videoRef.current || !ctx) return;
+    const handleDetectedText = (text: string) => {
+      if (!text || isCancelled) return;
+      const cleanText = text.trim();
+      const feedResult = collectorRef.current.feed(cleanText);
+
+      if (feedResult.progress.total > 1) {
+        setChunkProgress(feedResult.progress);
+      }
+
+      // Haptic & visual feedback
+      try {
+        navigator.vibrate?.(40);
+      } catch {
+        // ignore
+      }
+      setIsDetectedFlash(true);
+      setTimeout(() => setIsDetectedFlash(false), 200);
+
+      if (feedResult.isComplete && feedResult.data) {
+        try {
+          navigator.vibrate?.([60, 40, 60]);
+        } catch {
+          // ignore
+        }
+        stopStream();
+        onScanComplete(feedResult.data);
+      }
+    };
+
+    const scanFrame = async () => {
+      if (isCancelled || !videoRef.current) return;
 
       const video = videoRef.current;
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        const width = video.videoWidth;
-        const height = video.videoHeight;
+      // readyState >= 2 (HAVE_CURRENT_DATA) ensures frames are readable
+      if (video.readyState >= 2 && !isProcessing) {
+        isProcessing = true;
+        let detected = false;
 
-        if (width > 0 && height > 0) {
-          canvas.width = width;
-          canvas.height = height;
-          ctx.drawImage(video, 0, 0, width, height);
+        // Strategy 1: Native BarcodeDetector (GPU accelerated, handles tilt/skew/dark mode effortlessly)
+        if (barcodeDetector) {
+          try {
+            const barcodes = await barcodeDetector.detect(video);
+            if (barcodes.length > 0 && barcodes[0].rawValue) {
+              handleDetectedText(barcodes[0].rawValue);
+              detected = true;
+            }
+          } catch {
+            // fallback
+          }
+        }
 
-          const imageData = ctx.getImageData(0, 0, width, height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: "dontInvert",
-          });
+        // Strategy 2: High-speed jsQR fallback with attemptBoth & resolution downsampling
+        if (!detected && ctx) {
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
 
-          if (code && code.data) {
-            const feedResult = collectorRef.current.feed(code.data);
+          if (vw > 0 && vh > 0) {
+            // Downscale to max 640px to ensure 60fps throughput on CPU without frame drops
+            const maxDim = 640;
+            const scale = Math.min(1, maxDim / Math.max(vw, vh));
+            const width = Math.round(vw * scale);
+            const height = Math.round(vh * scale);
 
-            if (feedResult.progress.total > 1) {
-              setChunkProgress(feedResult.progress);
+            canvas.width = width;
+            canvas.height = height;
+            ctx.drawImage(video, 0, 0, width, height);
+
+            // Pass 1: Full frame scan with attemptBoth for inverted/OLED contrast
+            const fullImageData = ctx.getImageData(0, 0, width, height);
+            let code = jsQR(fullImageData.data, fullImageData.width, fullImageData.height, {
+              inversionAttempts: "attemptBoth",
+            });
+
+            // Pass 2: Center crop scan if full frame missed (focuses on target reticle)
+            if (!code) {
+              const cropSize = Math.round(Math.min(width, height) * 0.7);
+              const cropX = Math.round((width - cropSize) / 2);
+              const cropY = Math.round((height - cropSize) / 2);
+              const cropImageData = ctx.getImageData(cropX, cropY, cropSize, cropSize);
+
+              code = jsQR(cropImageData.data, cropImageData.width, cropImageData.height, {
+                inversionAttempts: "attemptBoth",
+              });
             }
 
-            // Quick visual ping
-            setIsDetectedFlash(true);
-            setTimeout(() => setIsDetectedFlash(false), 200);
-
-            if (feedResult.isComplete && feedResult.data) {
-              stopStream();
-              onScanComplete(feedResult.data);
-              return;
+            if (code && code.data) {
+              handleDetectedText(code.data);
             }
           }
         }
+
+        isProcessing = false;
       }
 
-      animationFrameRef.current = requestAnimationFrame(scanFrame);
+      if (!isCancelled) {
+        animationFrameRef.current = requestAnimationFrame(scanFrame);
+      }
     };
 
     startCamera();
@@ -200,10 +281,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       </div>
 
       {/* Viewfinder Area */}
-      <div className="relative aspect-[4/3] w-full bg-black/90 flex items-center justify-center overflow-hidden">
+      <div className="relative aspect-[4/3] w-full bg-black flex items-center justify-center overflow-hidden">
         {/* Flash Ping Effect */}
         {isDetectedFlash && (
-          <div className="absolute inset-0 z-30 bg-emerald-400/30 transition-opacity duration-150 pointer-events-none" />
+          <div className="absolute inset-0 z-30 bg-emerald-400/35 transition-opacity duration-150 pointer-events-none" />
         )}
 
         <video
@@ -216,36 +297,46 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
         {/* Reticle / Optical Target */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="relative h-48 w-48 rounded-xl border-2 border-dashed border-emerald-400/70 flex flex-col justify-between p-2 shadow-2xl">
+          <div className="relative h-56 w-56 sm:h-64 sm:w-64 rounded-2xl border-2 border-emerald-400/80 flex flex-col justify-between p-2.5 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+            {/* Animated Laser Scanline */}
+            <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse opacity-80 top-1/2 -translate-y-1/2" />
+
             <div className="flex justify-between">
-              <span className="h-4 w-4 border-t-2 border-l-2 border-emerald-400" />
-              <span className="h-4 w-4 border-t-2 border-r-2 border-emerald-400" />
+              <span className="h-5 w-5 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
+              <span className="h-5 w-5 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
             </div>
             <div className="text-center">
-              <span className="inline-block rounded-full bg-black/70 px-2 py-0.5 text-[9px] font-mono font-semibold text-emerald-300">
-                OPTICAL SIGNALING
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/80 px-2.5 py-0.5 text-[9px] font-mono font-bold text-emerald-300 backdrop-blur-sm border border-emerald-500/30">
+                {isEngineNative ? (
+                  <>
+                    <Zap className="h-2.5 w-2.5 text-amber-400" />
+                    HW ACCELERATED
+                  </>
+                ) : (
+                  "OPTICAL RETICLE"
+                )}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="h-4 w-4 border-b-2 border-l-2 border-emerald-400" />
-              <span className="h-4 w-4 border-b-2 border-r-2 border-emerald-400" />
+              <span className="h-5 w-5 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
+              <span className="h-5 w-5 border-b-2 border-r-2 border-emerald-400 rounded-br" />
             </div>
           </div>
         </div>
 
         {/* Multi-frame chunk progress banner */}
         {chunkProgress && chunkProgress.total > 1 && (
-          <div className="absolute bottom-3 inset-x-4 z-20 rounded-xl bg-background/95 backdrop-blur-md border border-emerald-500/40 p-2 text-foreground shadow-lg flex items-center justify-between">
+          <div className="absolute bottom-3 inset-x-4 z-20 rounded-xl bg-background/95 backdrop-blur-md border border-emerald-500/40 p-2.5 text-foreground shadow-xl flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <div className="text-[11px] font-medium">
-                Scanning animated QR frames:{" "}
+              <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
+              <div className="text-[11px] font-semibold">
+                Captured Frame:{" "}
                 <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                  {chunkProgress.current} / {chunkProgress.total}
+                  {chunkProgress.current} of {chunkProgress.total}
                 </span>
               </div>
             </div>
-            <div className="text-[10px] font-mono text-muted-foreground">
+            <div className="text-[10px] font-mono font-bold bg-muted px-2 py-0.5 rounded-md">
               {Math.round((chunkProgress.current / chunkProgress.total) * 100)}%
             </div>
           </div>
@@ -263,7 +354,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               className="rounded-full text-xs gap-1.5"
             >
               <Keyboard className="h-3.5 w-3.5" />
-              Paste SDP Data Directly
+              Paste Handshake SDP Directly
             </Button>
           </div>
         )}
@@ -272,7 +363,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       {/* Bottom Option Bar */}
       <div className="p-2.5 bg-background border-t border-border flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          Point camera at peer screen
+          Hold camera steady at peer QR code
         </span>
         <Button
           size="xs"
@@ -298,7 +389,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             value={manualText}
             onChange={(e) => setManualText(e.target.value)}
             rows={2}
-            placeholder="Paste DHR:Q:... or SDP payload here"
+            placeholder="Paste DHR:Q:... or raw SDP payload here"
             className="w-full text-[10px] font-mono p-2 rounded-lg border border-border bg-background text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-emerald-500"
           />
           <div className="flex justify-end gap-1.5">

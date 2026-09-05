@@ -149,6 +149,17 @@ export function isAlertDismissed(id: string): boolean {
   }
 }
 
+export function unmarkAlertDismissed(id: string): void {
+  try {
+    const raw = localStorage.getItem("dhr_dismissed_alerts");
+    const dismissed: string[] = raw ? JSON.parse(raw) : [];
+    const filtered = dismissed.filter((d) => d !== id);
+    localStorage.setItem("dhr_dismissed_alerts", JSON.stringify(filtered));
+  } catch {
+    // ignore
+  }
+}
+
 export function clearDismissedAlerts(): void {
   try {
     localStorage.removeItem("dhr_dismissed_alerts");
@@ -158,12 +169,24 @@ export function clearDismissedAlerts(): void {
 }
 
 /**
- * Delete an alert by ID.
+ * Delete an alert by ID and mark it dismissed so it won't auto-reimport.
  */
 export async function deleteOfficialAlert(id: string): Promise<void> {
   markAlertDismissed(id);
   const db = await getAlertsDB();
   await db.delete(ALERTS_STORE_NAME, id);
+}
+
+/**
+ * Clear all official alerts from the store and mark them dismissed.
+ */
+export async function clearAllOfficialAlerts(): Promise<void> {
+  const db = await getAlertsDB();
+  const alerts = await db.getAll(ALERTS_STORE_NAME);
+  for (const a of alerts) {
+    markAlertDismissed(a.id);
+  }
+  await db.clear(ALERTS_STORE_NAME);
 }
 
 /**
@@ -215,6 +238,7 @@ export async function convertReportToOfficialAlert(
   report: import("@/types/report").ReportRecord
 ): Promise<OfficialAlert> {
   const targetAlertId = `dhr-report-${report.id}`;
+  unmarkAlertDismissed(targetAlertId);
 
   const hazardType = (report.context.hazardType || "LANDSLIDE_SLIP") as
     | "LANDSLIDE_SLIP"
@@ -318,6 +342,7 @@ export async function importReportsFromLocalQueue(): Promise<{
 
   for (const report of localReports) {
     const targetAlertId = `dhr-report-${report.id}`;
+    if (isAlertDismissed(targetAlertId)) continue;
     const alreadySaved = await getOfficialAlertById(targetAlertId);
     if (alreadySaved) continue;
 
